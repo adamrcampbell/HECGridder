@@ -645,3 +645,23 @@ GLuint createProgram(GLuint fragmentShader, GLuint vertexShader) {
     checkProgramStatus(program);
     return program;
 }
+
+void saveGridToFile(void)
+{
+    FILE *file = fopen("HECgrid.txt", "w");
+    
+    if(file != NULL)
+    {
+        for(int row = 0; row < GRID_HEIGHT; row++)
+        {
+            for(int col = 0; col < GRID_WIDTH; col++)
+                fprintf(file, "%f %f ", baseGrid[row][col].real, baseGrid[row][col].imaginary);
+            
+            fprintf(file, "\n");
+        }
+        
+        fclose(file);
+    }
+    else
+        printf("ERROR: Unable to write base image file\n");
+}

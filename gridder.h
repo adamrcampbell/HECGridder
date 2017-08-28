@@ -62,6 +62,7 @@ double calculateSpheroidalPoint(const double nu);
 double sumLegendreSeries(const double x, const int m);
 void fillHelperMatrix(gsl_matrix *B, const int m);
 double fillLegendreCoeffs(const gsl_matrix *B);
+void saveGridToFile(void);
 
 #endif /* GRIDDER_H */
 

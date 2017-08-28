@@ -56,11 +56,11 @@ LDLIBSOPTIONS=-lgsl -lgslcblas -lGL -lGLEW -lGLU -lX11 -lglut -lm
 
 # Build Targets
 .build-conf: ${BUILD_SUBPROJECTS}
-	"${MAKE}"  -f nbproject/Makefile-${CND_CONF}.mk ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/gridder
+	"${MAKE}"  -f nbproject/Makefile-${CND_CONF}.mk ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/hecgridder
 
-${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/gridder: ${OBJECTFILES}
+${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/hecgridder: ${OBJECTFILES}
 	${MKDIR} -p ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}
-	${LINK.c} -o ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/gridder ${OBJECTFILES} ${LDLIBSOPTIONS}
+	${LINK.c} -o ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/hecgridder ${OBJECTFILES} ${LDLIBSOPTIONS}
 
 ${OBJECTDIR}/gridder.o: gridder.c
 	${MKDIR} -p ${OBJECTDIR}
