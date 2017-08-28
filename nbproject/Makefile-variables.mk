@@ -9,19 +9,19 @@ CND_DISTDIR=dist
 # Debug configuration
 CND_PLATFORM_Debug=GNU-Linux
 CND_ARTIFACT_DIR_Debug=dist/Debug/GNU-Linux
-CND_ARTIFACT_NAME_Debug=gridder
-CND_ARTIFACT_PATH_Debug=dist/Debug/GNU-Linux/gridder
+CND_ARTIFACT_NAME_Debug=hecgridder
+CND_ARTIFACT_PATH_Debug=dist/Debug/GNU-Linux/hecgridder
 CND_PACKAGE_DIR_Debug=dist/Debug/GNU-Linux/package
-CND_PACKAGE_NAME_Debug=gridder.tar
-CND_PACKAGE_PATH_Debug=dist/Debug/GNU-Linux/package/gridder.tar
+CND_PACKAGE_NAME_Debug=hecgridder.tar
+CND_PACKAGE_PATH_Debug=dist/Debug/GNU-Linux/package/hecgridder.tar
 # Release configuration
 CND_PLATFORM_Release=GNU-Linux
 CND_ARTIFACT_DIR_Release=dist/Release/GNU-Linux
-CND_ARTIFACT_NAME_Release=gridder
-CND_ARTIFACT_PATH_Release=dist/Release/GNU-Linux/gridder
+CND_ARTIFACT_NAME_Release=hecgridder
+CND_ARTIFACT_PATH_Release=dist/Release/GNU-Linux/hecgridder
 CND_PACKAGE_DIR_Release=dist/Release/GNU-Linux/package
-CND_PACKAGE_NAME_Release=gridder.tar
-CND_PACKAGE_PATH_Release=dist/Release/GNU-Linux/package/gridder.tar
+CND_PACKAGE_NAME_Release=hecgridder.tar
+CND_PACKAGE_PATH_Release=dist/Release/GNU-Linux/package/hecgridder.tar
 #
 # include compiler specific variables
 #
