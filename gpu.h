@@ -27,6 +27,22 @@
 
 //      gl_PointSize = position.b; \
 
+// R: Accumulation of weight on a kernel element
+// G: Complex Real * R
+// B: Complex Imaginary
+//#define FRAGMENT_SHADER " \
+//  #version 430\n \
+//  precision highp float; \
+//  uniform sampler2D kernalTex;\
+//  in vec2 fComplex; \
+//  void main() { \
+//    float kernelLookup = texture(kernalTex,gl_PointCoord).r; \
+//    gl_FragColor.r = gl_PointCoord.s; \
+//    gl_FragColor.ba = kernelLookup * fComplex; \
+//    gl_FragColor.g = gl_PointCoord.t; \
+//  }"
+
+
 #define FRAGMENT_SHADER " \
   #version 430\n \
   precision highp float; \
@@ -34,11 +50,11 @@
   in vec2 fComplex; \
   void main() { \
     float kernelLookup = texture(kernalTex,gl_PointCoord).r; \
-    gl_FragColor.r = kernelLookup; \
+    gl_FragColor.r = gl_PointCoord.s; \
     gl_FragColor.gb = kernelLookup * fComplex; \
-    gl_FragColor.a = 1.0; \
+    gl_FragColor.a = gl_PointCoord.t; \
   }"
-
+//vec2 newCoords = (gl_PointCoord-0.5)*pointSize/(pointSize-1.0)+0.5;\
 
 #define FRAGMENT_SHADER_RENDER " \
   #version 430\n \
