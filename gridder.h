@@ -63,6 +63,8 @@ double sumLegendreSeries(const double x, const int m);
 void fillHelperMatrix(gsl_matrix *B, const int m);
 double fillLegendreCoeffs(const gsl_matrix *B);
 void saveGridToFile(void);
+void loadVisibilitySamples(void);
+void compareToIdealGrid(void);
 
 #endif /* GRIDDER_H */
 
