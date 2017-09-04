@@ -40,7 +40,6 @@ static int visibilityParams;
  *-------------------------------------------------------------------*/
 static int refreshDelay;
 static GLfloat guiRenderBounds[8];
-static const unsigned int windowDimension;
 
 /*--------------------------------------------------------------------
  *   KAISER BESSEL CONFIG
@@ -79,7 +78,7 @@ static GLuint* visibilityIndices;
 static GLfloat* visibilities;
 
 int iterationCount = 0;
-const int dumpTime = 1;
+const int dumpTime = 10;
 
 int counter =0;
 int counterAverage;
@@ -90,16 +89,18 @@ struct timeval timeCallsReal;
 int timeCallsProcess;
 bool toggle = 0;
 
+const int windowDisplay = 800;
+
 void initConfig(void) {
     // Global
-    gridDimension = 10.0f;
-    kernelSize = 7.0f;
-    kernelType = PROLATE;
-    visibilityCount = 1;
+    gridDimension = 8000.0f;
+    kernelSize = 127.0f;
+    kernelType = KAISER;
+    visibilityCount = 19800;
     visibilityParams = 5;
-    
+
     // Gui
-    refreshDelay = 100;
+    refreshDelay = 0;
     GLfloat renderTemp[8] = {
         0.0f, 0.0f,
         0.0f, gridDimension,
@@ -107,11 +108,10 @@ void initConfig(void) {
         gridDimension, gridDimension
     };
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
-    windowDimension = 1000;
 
     // Kaiser
     kaiserAlpha = 2.59f;
-    accuracy = 1E-12;
+    accuracy = 1E-6;
     piAlpha = M_PI * kaiserAlpha;
     
     // Prolate
@@ -140,7 +140,7 @@ void initGridder(void) {
         gridBuffer[i + 2] = 0.0f;
         gridBuffer[i + 3] = 0.0f;
     }
-    
+
     visibilities = malloc(sizeof (GLfloat) * visibilityParams * visibilityCount);
     visibilityIndices = malloc(sizeof (GLuint) * visibilityCount);
 
@@ -203,7 +203,6 @@ void initGridder(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_2D);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, (int) kernelSize, (int) kernelSize, 0, GL_RED, GL_FLOAT, kernalBuffer);
-    //glGenerateMipmap(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, 0);
 
     
@@ -215,114 +214,33 @@ void initGridder(void) {
     glEnable(GL_POINT_SPRITE);
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
     
-    // loadVisibilitySamples();
-    visibilities[0] = 3.0f;
-    visibilities[1] = 3.0f;
-    visibilities[2] = 7.0f;
-    visibilities[3] = 1.0f;
-    visibilities[4] = 2.0f;
-    
     counter = 0;
     sumTimeProcess = 0.0f;
     gettimeofday(&timeCallsReal, 0);
     timeCallsProcess = clock();
 }
 
-void compareToIdealGrid(void)
-{
-    FILE *file = fopen("/home/ubuntu/Desktop/ideal_grids/ideal_grid_test_127.txt", "r");
-    
-    if(file != NULL)
-    {
-        float ideal_real;
-        float ideal_imaginary;
-        float sumDiffSquared = 0.0f;
-        float sumBaseSquared = 0.0f;
-
-        for(int row = 0; row < gridDimension; row++)
-        {
-            for(int col = 0; col < gridDimension*4; col+=4)
-            {
-                fscanf(file, "%f %f", &ideal_real, &ideal_imaginary);
-                float a = gridBuffer[(row*(int)gridDimension*4)+col+1];
-                float b = gridBuffer[(row*(int)gridDimension*4)+col+2];
-                float c = ideal_real;
-                float d = ideal_imaginary;
-                
-                printf("%f ", c);
-                
-                float aMinusCSquared = (a-c)*(a-c); //pow(a-c, 2);
-                float bMinusDSquared = (b-d)*(b-d); //pow(b-d, 2);
-                float cSquared = c*c; //pow(c, 2);
-                float dSquared = d*d; //pow(d, 2);
-                sumDiffSquared += (aMinusCSquared + bMinusDSquared);
-                sumBaseSquared += (cSquared+dSquared);
-                
-            }
-            printf("\n");
-        }
-        
-        fclose(file);
-        printf("Difference: %f\n", sqrt(sumDiffSquared / sumBaseSquared));
-        exit(0);
-    }
-    else
-        printf("ERROR: Unable to read grid file\n");
-}
-
-void loadVisibilitySamples(void)
-{
-    FILE *file = fopen("/home/ubuntu/Desktop/visibility_samples/christian_samples_8000.txt", "r");
-    
-    if(file != NULL)
-    {
-        float temp_u;
-        float temp_v;
-        float temp_real;
-        float temp_imaginary;
-       
-        int visCount = 0;
-        
-        for(int i = 0; i < visibilityCount * visibilityParams; i += visibilityParams)
-        {
-            fscanf(file, "%f %f %f %f", &temp_u, &temp_v, &temp_real, &temp_imaginary);
-            visibilities[i] = temp_u;
-            visibilities[i+1] = temp_v;
-            visibilities[i+2] = 127.0f;
-            visibilities[i+3] = temp_real;
-            visibilities[i+4] = temp_imaginary;
-            visCount++;
-        }
-        
-        fclose(file);
-        
-        printf("SUCCESS: File read, %d samples in memory\n", visCount);
-    }
-    else
-        printf("ERROR: Unable to read samples file\n");
-}
-
 void runGridder(void) {
     
-//    for (int i = 0; i < visibilityCount * visibilityParams; i += visibilityParams) {
-//        
-//        int randomKernel = (int)((float)rand()/RAND_MAX * 121)+7;
-//        
-//        while(randomKernel % 2 == 0)
-//        {
-//            randomKernel = (int)((float)rand()/RAND_MAX * 121)+7;
-//        }
-//        
-//        visibilities[i] = (float) (rand() % (int) gridDimension);
-//        visibilities[i + 1] = (float) (rand() % (int) gridDimension);
-//        visibilities[i + 2] = (float) randomKernel;
-//        visibilities[i + 3] = ((float)rand()/RAND_MAX * 2.0f)-1.0f;
-//        visibilities[i + 4] = ((float)rand()/RAND_MAX * 2.0f)-1.0f;
-//    }
+    for (int i = 0; i < visibilityCount * visibilityParams; i += visibilityParams) {
+        
+        int randomKernel = (int)((float)rand()/RAND_MAX * 121)+7;
+        
+        while(randomKernel % 2 == 0)
+        {
+            randomKernel = (int)((float)rand()/RAND_MAX * 121)+7;
+        }
+        
+        visibilities[i] = (float) (rand() % (int) gridDimension);
+        visibilities[i + 1] = (float) (rand() % (int) gridDimension);
+        visibilities[i + 2] = (float) randomKernel;
+        visibilities[i + 3] = ((float)rand()/RAND_MAX * 2.0f)-1.0f;
+        visibilities[i + 4] = ((float)rand()/RAND_MAX * 2.0f)-1.0f;
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, fboID);
     glEnable(GL_BLEND);
-    glViewport(0, 0, windowDimension, windowDimension);
+    glViewport(0, 0, gridDimension, gridDimension);
 
     struct timeval timeFunctionReal;
     gettimeofday(&timeFunctionReal, 0);
@@ -367,45 +285,25 @@ void runGridder(void) {
     
     if(iterationCount == dumpTime)
     {
-        // Read pixels
         glFinish();
         glReadPixels(0, 0, gridDimension, gridDimension, GL_RGBA, GL_FLOAT, gridBuffer);
-        
-        printf("Sampled Grid\n");
-        for(int row = 0; row < gridDimension; row++)
-        {
-            for(int col = 0; col < ((gridDimension)*4); col+=4)
-            {
-                float a = gridBuffer[(row*(int)gridDimension*4)+col];
-                float b = gridBuffer[(row*(int)gridDimension*4)+col+1];
-                //float c = gridBuffer[(row*(int)gridDimension*4)+col+2];
-                float d = gridBuffer[(row*(int)gridDimension*4)+col+3];
-               // printf("%f ", b);
-                printf("%f ", b);
-            }
-            printf("\n");
-        }
-        printf("\n");
-        
-        compareToIdealGrid();
-        
 //        printf("Pixel1: %f %f %f %f\n", gridBuffer[0], gridBuffer[1], gridBuffer[2], gridBuffer[3]);
 //        printf("Pixel2: %f %f %f %f\n", gridBuffer[4], gridBuffer[5], gridBuffer[6], gridBuffer[7]);
         
 //        for(int i = 0; i < kernelSize * 3; i+=3)
 //            printf("Pixel%d: %f %f %f\n", i, gridBuffer[i], gridBuffer[i+1], gridBuffer[i+2]);
     
-//        iterationCount = 0;
-//        
-//        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-//        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        iterationCount = 0;
+        
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
     
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     //glPopAttrib();
 
     //DRAW RENDERING
-     glViewport(0, 0, gridDimension, gridDimension);
+     glViewport(0, 0, windowDisplay, windowDisplay);
     glUseProgram(sProgramRender);
     glBindTexture(GL_TEXTURE_2D, textureID);
     glUniform1i(uShaderTextureHandle, 0);
@@ -436,8 +334,6 @@ void runGridder(void) {
 
 void createKernel(void)
 {    
-    printf("This is Colonel Kernel\n");
-    
     if(kernelType == KAISER || kernelType == PROLATE)
     {
         float start = -1.0 + (1.0/kernelSize);
@@ -446,76 +342,23 @@ void createKernel(void)
         for (int row = 0; row < kernelSize; row++) {
             
             float rowKernelWeight = calculateKernelWeight(start+(row*step));
-
-//            printf("row: %d %f %f\n",row, row/half_width_adam-1.0f, rowKernelWeight);
-           // printf("%f\n", rowKernelWeight);
-//            printf("\n\n");
             
             for (int col = 0, c = 0; col < kernelSize; col++, c++) {
               
-                // kernalBuffer[(int) kernelSize * row + col] = 1.0f;
                 kernalBuffer[(int) kernelSize * row + col] = rowKernelWeight * calculateKernelWeight(start+(col*step));
-//                kernalBuffer[(int) kernelSize * 4 * row + (col + 1)] = 1.0f;
-//                kernalBuffer[(int) kernelSize * 4 * row + (col + 2)] = 0.0f;
-//                kernalBuffer[(int) kernelSize * 4 * row + (col + 3)] = 0.0f;
-                
-              // printf("%f ", kernalBuffer[(int) kernelSize * row + col]);
+                // printf("%f ", kernalBuffer[(int) kernelSize * row + col]);
             }
-            //printf("\n");
+            
+            // printf("\n");
         }
-       // printf("\n\n\n");
     }
     else
     {
         for (int i = 0; i < kernelSize * kernelSize; i++) {
             kernalBuffer[i] = (GLfloat) rand() / RAND_MAX;
-//            kernalBuffer[i + 1] = (GLfloat) rand() / RAND_MAX;
-//            kernalBuffer[i + 2] = (GLfloat) rand() / RAND_MAX;
-//            kernalBuffer[i + 3] = 1.0f;
         }
     }
 }
-
-//void createKernel(void)
-//{    
-//    printf("This is Colonel Kernel\n");
-//    
-//    if(kernelType == KAISER || kernelType == PROLATE)
-//    {
-//        float half_width_adam = ((kernelSize - 1.0f)) / 2.0f;
-//        
-//        for (int row = 0; row < kernelSize; row++) {
-//            
-//            float rowKernelWeight = calculateKernelWeight(row/half_width_adam-1.0f);
-//
-////            printf("row: %d %f %f\n",row, row/half_width_adam-1.0f, rowKernelWeight);
-//            printf("%f ", rowKernelWeight);
-////            printf("\n\n");
-//            
-//            for (int col = 0, c = 0; col < kernelSize; col++, c++) {
-//                float colWeight = c/half_width_adam-1.0f;
-//                // kernalBuffer[(int) kernelSize * row + col] = 1.0f;
-//                kernalBuffer[(int) kernelSize * row + col] = rowKernelWeight * calculateKernelWeight(colWeight);
-////                kernalBuffer[(int) kernelSize * 4 * row + (col + 1)] = 1.0f;
-////                kernalBuffer[(int) kernelSize * 4 * row + (col + 2)] = 0.0f;
-////                kernalBuffer[(int) kernelSize * 4 * row + (col + 3)] = 0.0f;
-//                
-//               //printf("%f ", kernalBuffer[(int) kernelSize * row + col]);
-//            }
-//            //printf("\n");
-//        }
-////        printf("\n\n\n");
-//    }
-//    else
-//    {
-//        for (int i = 0; i < kernelSize * kernelSize; i++) {
-//            kernalBuffer[i] = (GLfloat) rand() / RAND_MAX;
-////            kernalBuffer[i + 1] = (GLfloat) rand() / RAND_MAX;
-////            kernalBuffer[i + 2] = (GLfloat) rand() / RAND_MAX;
-////            kernalBuffer[i + 3] = 1.0f;
-//        }
-//    }
-//}
 
 double calculateKernelWeight(float x)
 {   
@@ -528,15 +371,14 @@ double calculateKernelWeight(float x)
 int main(int argc, char** argv) {
 
     initConfig();
-    float y = calculateKaiserPoint(-1.0f);
-    printf("ohhh nooooooooo %f\n",y);
+    
     srand((unsigned int) time(NULL));
     setenv("DISPLAY", ":0", 11.0);
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
-    glutInitWindowSize(windowDimension, windowDimension);
+    glutInitWindowSize(windowDisplay, windowDisplay);
     glutInitWindowPosition(0, 0);
-    glutCreateWindow("HEC Gridder");
+    glutCreateWindow("Gridder");
     glutDisplayFunc(runGridder);
     glutTimerFunc(refreshDelay, timerEvent, 0);
     //glewInit();
@@ -552,8 +394,8 @@ int main(int argc, char** argv) {
 }
 
 float calculateKaiserPoint(float i) {
-//    if (i <= -1. || i >= 1.)
-//        return 0;
+    if (i <= -1. || i >= 1.)
+        return 0;
 
     float innerTerm = 2.0 * (i + 1.0) / 2 - 1;
     float x = piAlpha * sqrt(1 - innerTerm * innerTerm);
@@ -795,7 +637,7 @@ GLuint createProgram(GLuint fragmentShader, GLuint vertexShader) {
     checkProgramStatus(program);
     return program;
 }
-
+//
 //void saveGridToFile(void)
 //{
 //    FILE *file = fopen("HECgrid.txt", "w");
