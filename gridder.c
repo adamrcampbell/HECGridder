@@ -111,7 +111,7 @@ void initConfig(void) {
 
     // Kaiser
     kaiserAlpha = 2.59f;
-    accuracy = 1E-6;
+    accuracy = 1E-12;
     piAlpha = M_PI * kaiserAlpha;
     
     // Prolate

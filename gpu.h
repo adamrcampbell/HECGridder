@@ -9,6 +9,10 @@
 #ifndef GPU_H
 #define GPU_H
 
+/*
+ * Inclusion of 0.04 to gl_PointSize is to accommodate overflow
+ * of kernel texture weights when smearing a fixed sized kernel texture. 
+ */
 #define VERTEX_SHADER " \
   #version 430\n \
   precision highp float; \
@@ -18,7 +22,7 @@
   void main() { \
      gl_Position.rg = (2.0*position.rg + 1.0) / %f -1.0; \
      gl_Position.ba = vec2(0.5,1.0);\
-     gl_PointSize = position.b; \
+     gl_PointSize = position.b + 0.04; \
      fComplex = complex; \
   }"
 
