@@ -73,12 +73,12 @@ static GLuint textureID;
 static GLuint kernalTextureID;
 
 static GLfloat* gridBuffer;
-static GLfloat* kernalBuffer;
+static Complex* kernalBuffer;
 static GLuint* visibilityIndices;
 static GLfloat* visibilities;
 
 int iterationCount = 0;
-const int dumpTime = 10;
+const int dumpTime = 9999;
 
 int counter =0;
 int counterAverage;
@@ -122,7 +122,7 @@ void initConfig(void) {
 
 void initGridder(void) {
    
-    kernalBuffer = (GLfloat*) malloc(sizeof (GLfloat) * kernelSize * kernelSize);
+    kernalBuffer = (Complex*) malloc(sizeof (Complex) * kernelSize * kernelSize);
     if(kernelType == PROLATE)
         initSpheroidal();
     
@@ -202,13 +202,8 @@ void initGridder(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_2D);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, (int) kernelSize, (int) kernelSize, 0, GL_RED, GL_FLOAT, kernalBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0,  GL_RG32F, (int) kernelSize, (int) kernelSize, 0,  GL_RG, GL_FLOAT, kernalBuffer);
     glBindTexture(GL_TEXTURE_2D, 0);
-
-    
-//    glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
-//    glPointSize((int) kernelSize);
-//    glEnable(GL_POINT_SPRITE);
     
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
     glEnable(GL_POINT_SPRITE);
@@ -344,8 +339,9 @@ void createKernel(void)
             float rowKernelWeight = calculateKernelWeight(start+(row*step));
             
             for (int col = 0, c = 0; col < kernelSize; col++, c++) {
-              
-                kernalBuffer[(int) kernelSize * row + col] = rowKernelWeight * calculateKernelWeight(start+(col*step));
+                
+                kernalBuffer[(int) kernelSize * row + col].real = rowKernelWeight * calculateKernelWeight(start+(col*step));
+                kernalBuffer[(int) kernelSize * row + col].imaginary = 0.0f;
                 // printf("%f ", kernalBuffer[(int) kernelSize * row + col]);
             }
             
@@ -354,9 +350,7 @@ void createKernel(void)
     }
     else
     {
-        for (int i = 0; i < kernelSize * kernelSize; i++) {
-            kernalBuffer[i] = (GLfloat) rand() / RAND_MAX;
-        }
+        printf("ERROR: Unsupported kernel type\n");
     }
 }
 
@@ -378,7 +372,7 @@ int main(int argc, char** argv) {
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
     glutInitWindowSize(windowDisplay, windowDisplay);
     glutInitWindowPosition(0, 0);
-    glutCreateWindow("Gridder");
+    glutCreateWindow("Derp Gridder");
     glutDisplayFunc(runGridder);
     glutTimerFunc(refreshDelay, timerEvent, 0);
     //glewInit();

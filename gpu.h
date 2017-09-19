@@ -26,16 +26,23 @@
      fComplex = complex; \
   }"
 
+// (a+bi)(c+di)=(ac-bd)+(bc+ad)i
+
+// R: Kernel Weight (real)
+// G: Kernel Weight (real) * Visibility Real
+// B: Kernel Weight (imaginary) * Visibility Imaginary
+// A: Kernel Weight (imaginary) accumulation
 #define FRAGMENT_SHADER " \
   #version 430\n \
   precision highp float; \
   uniform sampler2D kernalTex;\
   in vec2 fComplex; \
   void main() { \
-    float kernelLookup = texture(kernalTex,gl_PointCoord).r; \
-    gl_FragColor.r = kernelLookup; \
-    gl_FragColor.gb = kernelLookup * fComplex; \
-    gl_FragColor.a = 1.0; \
+    vec2 kernelLookup = texture(kernalTex,gl_PointCoord).rg; \
+    gl_FragColor.r = kernelLookup.r; \
+    gl_FragColor.gb = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
+                                 kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
+    gl_FragColor.a = kernelLookup.g; \
   }"
 
 #define FRAGMENT_SHADER_RENDER " \
