@@ -73,7 +73,7 @@ static GLuint textureID;
 static GLuint kernalTextureID;
 
 static GLfloat* gridBuffer;
-static Complex* kernalBuffer;
+static Complex* kernelBuffer;
 static GLuint* visibilityIndices;
 static GLfloat* visibilities;
 
@@ -95,7 +95,7 @@ void initConfig(void) {
     // Global
     gridDimension = 8000.0f;
     kernelSize = 127.0f;
-    kernelType = KAISER;
+    kernelType = PROLATE;
     visibilityCount = 19800;
     visibilityParams = 5;
 
@@ -122,7 +122,7 @@ void initConfig(void) {
 
 void initGridder(void) {
    
-    kernalBuffer = (Complex*) malloc(sizeof (Complex) * kernelSize * kernelSize);
+    kernelBuffer = (Complex*) malloc(sizeof (Complex) * kernelSize * kernelSize);
     if(kernelType == PROLATE)
         initSpheroidal();
     
@@ -169,7 +169,6 @@ void initGridder(void) {
     glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 8, guiRenderBounds, GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-
     //Generate Texture for output.
     glGenBuffers(1, &visibilityBuffer);
 
@@ -202,7 +201,7 @@ void initGridder(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_2D);
-    glTexImage2D(GL_TEXTURE_2D, 0,  GL_RG32F, (int) kernelSize, (int) kernelSize, 0,  GL_RG, GL_FLOAT, kernalBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0,  GL_RG32F, (int) kernelSize, (int) kernelSize, 0,  GL_RG, GL_FLOAT, kernelBuffer);
     glBindTexture(GL_TEXTURE_2D, 0);
     
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
@@ -321,37 +320,55 @@ void runGridder(void) {
     
     glutSwapBuffers();
     
-    
     printTimesAverage(timeFunctionReal,timeFunctionProcess,"ENTIRE FUNCTION TIME");
     gettimeofday(&timeCallsReal, 0);
     timeCallsProcess = clock();
 }
 
 void createKernel(void)
-{    
-    if(kernelType == KAISER || kernelType == PROLATE)
+{   
+    float start = -1.0 + (1.0/kernelSize);
+    float step = 2.0f/kernelSize;
+    
+    if(kernelType == KAISER)
     {
-        float start = -1.0 + (1.0/kernelSize);
-        float step = 2.0f/kernelSize;
-        
         for (int row = 0; row < kernelSize; row++) {
             
             float rowKernelWeight = calculateKernelWeight(start+(row*step));
             
             for (int col = 0, c = 0; col < kernelSize; col++, c++) {
                 
-                kernalBuffer[(int) kernelSize * row + col].real = rowKernelWeight * calculateKernelWeight(start+(col*step));
-                kernalBuffer[(int) kernelSize * row + col].imaginary = 0.0f;
-                // printf("%f ", kernalBuffer[(int) kernelSize * row + col]);
+                kernelBuffer[(int) kernelSize * row + col].real = rowKernelWeight * calculateKernelWeight(start+(col*step));
+                kernelBuffer[(int) kernelSize * row + col].imaginary = 0.0f;
+                // printf("%f ", kernelBuffer[(int) kernelSize * row + col]);
             }
-            
             // printf("\n");
         }
     }
-    else
+    else if(kernelType == PROLATE)
     {
-        printf("ERROR: Unsupported kernel type\n");
+        float * curve = malloc(sizeof(float) * kernelSize);
+        
+        for(int i = 0; i < kernelSize; i++)
+            curve[i] = start+(i*step);
+        
+        calculateSpheroidalCurve(curve, kernelSize);
+        
+        for(int row = 0; row < kernelSize; row++)
+        {
+            for(int col = 0; col < kernelSize; col++)
+            {
+                kernelBuffer[(int) kernelSize * row + col].real = curve[row] * curve[col];
+                kernelBuffer[(int) kernelSize * row + col].imaginary = 0.0f;
+                //printf("%f ", kernelBuffer[(int) kernelSize * row + col].real);
+            }
+            //printf("\n");
+        }
+        
+        free(curve);
     }
+    else
+        printf("ERROR: Unsupported kernel type\n");
 }
 
 double calculateKernelWeight(float x)
@@ -416,6 +433,62 @@ float getZeroOrderModifiedBessel(float x) {
     return sum;
 }
 
+void calculateSpheroidalCurve(float * nu, int kernelWidth)
+{   
+    float p[2][5] = {{8.203343e-2, -3.644705e-1, 6.278660e-1, -5.335581e-1, 2.312756e-1},
+                     {4.028559e-3, -3.697768e-2, 1.021332e-1, -1.201436e-1, 6.412774e-2}};
+    float q[2][3] = {{1.0000000e0, 8.212018e-1, 2.078043e-1},
+                     {1.0000000e0, 9.599102e-1, 2.918724e-1}};
+    
+    int pNum = 5;
+    int qNum = 3;
+    
+    for(int i = 0; i < kernelWidth; i++)
+        nu[i] = fabsf(nu[i]);
+    
+    int part[kernelWidth];
+    float nuend[kernelWidth];
+    for(int i = 0; i < kernelWidth; i++)
+    {
+        if(nu[i] >= 0.0f && nu[i] <= 0.75f)
+            part[i] = 0;
+        else if(nu[i] > 0.75f && nu[i] < 1.0f)
+            part[i] = 1;
+        
+        if(nu[i] >= 0.0f && nu[i] <= 0.75f)
+            nuend[i] = 0.75f;
+        else if(nu[i] > 0.75f && nu[i] < 1.0f)
+            nuend[i] = 1.0f;      
+    }
+    
+    float delnusq[kernelWidth];
+    for(int i = 0; i < kernelWidth; i++)
+        delnusq[i] = (nu[i] * nu[i]) - (nuend[i] * nuend[i]);
+    
+    float top[kernelWidth];
+    for(int i = 0; i < kernelWidth; i++)
+        top[i] = p[part[i]][0];
+    
+    for(int i = 1; i < pNum; i++)
+        for(int y = 0; y < kernelWidth; y++)
+            top[y] += (p[part[y]][i] * pow(delnusq[y], i)); 
+    
+    float bottom[kernelWidth];
+    for(int i = 0; i < kernelWidth; i++)
+        bottom[i] = q[part[i]][0];
+    
+    for(int i = 1; i < qNum; i++)
+        for(int y = 0; y < kernelWidth; y++)
+            bottom[y] += (q[part[y]][i] * pow(delnusq[y], i));
+    
+    for(int i = 0; i < kernelWidth; i++)
+    {   
+        float absNu = abs(nu[i]);
+        nu[i] = (bottom[i] > 0.0f) ? top[i]/bottom[i] : 0.0f;
+        if(absNu > 1.0f)
+            nu[i] = 0.0f;
+    }
+}
 
 double sumLegendreSeries(const double x, const int m)
 {

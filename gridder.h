@@ -65,6 +65,7 @@ double fillLegendreCoeffs(const gsl_matrix *B);
 void saveGridToFile(void);
 void loadVisibilitySamples(void);
 void compareToIdealGrid(void);
+void calculateSpheroidalCurve(float * nu, int kernelWidth);
 
 #endif /* GRIDDER_H */
 
