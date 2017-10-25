@@ -12,13 +12,13 @@
 /*--------------------------------------------------------------------
 *   STRUCTS
 *-------------------------------------------------------------------*/
-typedef struct Complex {
+typedef struct FloatComplex {
     float real;
     float imaginary;
-} Complex;
+} FloatComplex;
 
 typedef struct Visibility {
-    Complex complex;
+    FloatComplex comp;
     float u;
     float v;
     float w;
@@ -46,7 +46,7 @@ enum kernel {
 void initConfig(void);
 void initGridder(void);
 void runGridder(void);
-void createKernel(void);
+void createKernel(int depth);
 void checkShaderStatus(GLuint shader);
 void checkProgramStatus(GLuint program);
 GLuint createShader(GLenum shaderType, const char* shaderSource);
@@ -66,6 +66,15 @@ void saveGridToFile(void);
 void loadVisibilitySamples(void);
 void compareToIdealGrid(void);
 void calculateSpheroidalCurve(float * nu, int kernelWidth);
+//void wKernelList(void);
+//void createWTermLike(int width, FloatComplex wScreen[][width], float w);
+//void wBeam(float width, FloatComplex wScreen[][width], int numPixel, float fieldOfView, float w, float centerX, float centerY);
+//int digitize(float w, float wmaxabs);
+//void calcSpheroidalCurve(float * curve, int width);
+//void fft2DVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
+//int* calcBitReversedIndices(int n);
+void populate3DKernel(void);
+void printGrid(void);
 
 #endif /* GRIDDER_H */
 

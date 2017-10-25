@@ -39,6 +39,7 @@
       <compileType>
         <cTool>
           <standard>10</standard>
+          <commandLine>-Wall -Wstrict-prototypes -ansi -pedantic</commandLine>
         </cTool>
         <linkerTool>
           <linkerLibItems>
