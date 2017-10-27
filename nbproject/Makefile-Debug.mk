@@ -39,7 +39,7 @@ OBJECTFILES= \
 
 
 # C Compiler Flags
-CFLAGS=
+CFLAGS=-Wall -Wstrict-prototypes -ansi -pedantic
 
 # CC Compiler Flags
 CCFLAGS=
