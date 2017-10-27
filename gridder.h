@@ -66,15 +66,21 @@ void saveGridToFile(void);
 void loadVisibilitySamples(void);
 void compareToIdealGrid(void);
 void calculateSpheroidalCurve(float * nu, int kernelWidth);
-//void wKernelList(void);
-//void createWTermLike(int width, FloatComplex wScreen[][width], float w);
-//void wBeam(float width, FloatComplex wScreen[][width], int numPixel, float fieldOfView, float w, float centerX, float centerY);
-//int digitize(float w, float wmaxabs);
-//void calcSpheroidalCurve(float * curve, int width);
-//void fft2DVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
-//int* calcBitReversedIndices(int n);
+void wKernelList(void);
+void createWTermLike(int width, FloatComplex wScreen[][width], float w);
+void wBeam(int width, FloatComplex wScreen[][width], float fieldOfView, float w, float centerX, float centerY);
+int digitize(float w, float wmaxabs);
+void calcSpheroidalCurve(float * curve);
+void fft2DVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
+int* calcBitReversedIndices(int n);
 void populate3DKernel(void);
 void printGrid(void);
+
+FloatComplex complexAdd(FloatComplex x, FloatComplex y);
+FloatComplex complexSubtract(FloatComplex x, FloatComplex y);
+FloatComplex complexDivide(FloatComplex x, FloatComplex y);
+FloatComplex complexMultiply(FloatComplex x, FloatComplex y);
+FloatComplex complexExponential(float ph);
 
 #endif /* GRIDDER_H */
 

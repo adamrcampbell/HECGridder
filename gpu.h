@@ -21,12 +21,12 @@
   out vec2 fComplex; \
   out float depthTexel;\
   void main() { \
-     float depth = 2.0; \
+     float depth = 0.0; \
      float maxDepth = 3.0; \
      gl_Position.rg = (2.0*position.rg + 1.0) / %f -1.0; \
      gl_Position.ba = vec2(0.5,1.0);\
      depthTexel = (2.0*depth+1.0)/(2.0*maxDepth); \
-     gl_PointSize = 127.0 + 0.04; \
+     gl_PointSize = 11.0 + 0.04; \
      fComplex = complex; \
   }"
 

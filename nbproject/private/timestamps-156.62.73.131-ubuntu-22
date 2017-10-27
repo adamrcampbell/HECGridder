@@ -1,4 +1,4 @@
-#Wed Oct 25 15:23:00 NZDT 2017
+#Fri Oct 27 17:14:36 NZDT 2017
 /home/adam/NetBeansProjects/Gridder/gpu.h=c1501806501000
 /home/adam/Desktop/git-repos/HECGridder/.git/hooks/commit-msg.sample=c1503268096000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/f6/26607d62d8daabe41ad0c2c29ed955a9dd4129=c1503270209000
@@ -22,12 +22,14 @@
 /home/adam/Desktop/git-repos/HECGridder/.git/logs/refs/remotes/origin/kernel=c1504480790000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/79/99a434170e9f6fb901a7c23e8c77c6e648af52=c1504493822000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/ae/f7ea32d6136eaed8d88443d10744f81ca59d8b=c1503880227000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/f8/a6602ff4bf3ff04f152783e7d40ae7be62f720=c1508898342000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/refs/remotes/origin/filesaving=c1503880304000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/fe/0f10caf2d3b104ef7e4a440caa777925519733=c1504493822000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/2f/2b33cd5a9256cf9f656c30ce1dd34895efe7bf=c1508898291000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/hooks/pre-rebase.sample=c1503268096000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/a6/4183e1078487c7564f3af83e8ffe7283062bb2=c1503268776000
 /home/adam/NetBeansProjects/Gridder/nbproject/project.xml=c1501543402000
-/home/adam/Desktop/Thesis/Programs/HECGridder/.git/COMMIT_EDITMSG=c1507068129000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/COMMIT_EDITMSG=c1508898342000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/31/56d347c4e66d13f1a51feb93c4a26606a99003=c1507068129000
 /home/adam/Desktop/git-repos/HECGridder/.git/FETCH_HEAD=c1503880480000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/70/cdff881b11c47d85a963cf767b75040cfa819f=c1503268776000
@@ -43,8 +45,9 @@
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/f5/daa873936bb55e0c8f2daf8ee8b4c7ac6af665=c1505863807000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/config=c1503880490000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/03/613a724bfd5fec6253a3c5e66ecb58b589f8a8=c1503268776000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/47/f03162210ae0c9b4275f66783e7c02c78fa7a5=c1508898291000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/a3/7c1dac86916273e3b26c565467c6182812ee71=c1503880227000
-/home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/HEAD=c1507068380000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/HEAD=c1508898342000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/3f/c89a7b4e55eec58825eda47280ef1c90944ff1=c1503268776000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/description=c1503268096000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/hooks/post-update.sample=c1503268096000
@@ -63,10 +66,12 @@
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/30/5fb7e22b28c473ca3a1dffea5744fa826c554f=c1507068129000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/19/00b2fbcf60095e02f8a8b6b06d646e54b10525=c1503268776000
 /home/adam/NetBeansProjects/Gridder/nbproject/Package-Debug.bash=c1501543360000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/c0/6a97fc394e193f7bc4cd499d67fbfb45e2f1f6=c1508898342000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/53/15c4125859073a1ce34a0410e96c8108fc09f9=c1503268776000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/e4/1e2df8047ca00f308a231eb5b6e9a5e848094d=c1503268773000
 /home/adam/Desktop/Thesis/Programs/HECGridder/nbproject/Makefile-variables.mk=c1503880480000
 /home/adam/NetBeansProjects/Gridder/nbproject/Makefile-Debug.mk=c1501552700000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/ca/e7115f49c7432a07b8be38182836f4ea46baf9=c1508898342000
 /home/adam/Desktop/git-repos/HECGridder/.git/description=c1503268096000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/67/1b6ec53675c6a3bb839c169555269cfa60e8dc=c1504480728000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/05/c05ea2ae1ba025a5aca4190702d5edd4f48083=c1505864523000
@@ -97,10 +102,10 @@
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/09/a3be656494d9f1226dc5fda06c152ebcf03657=c1503268776000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/2f/5f6b949e455a6039cd4746591acbdbfafed6fe=c1503270209000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/94/61bd1ad5a5a6e7540754cd0fdbf6b95c493dfb=c1505085564000
-/home/adam/Desktop/Thesis/Programs/HECGridder/gridder.h=c1508896759000
+/home/adam/Desktop/Thesis/Programs/HECGridder/gridder.h=c1509077547000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/d3/29cb0d7ab8257d5f7d4dcd43ae83db4c1c5d71=c1503268776000
 /home/adam/Desktop/Thesis/Programs/HECGridder/nbproject/Package-Debug.bash=c1503880480000
-/home/adam/Desktop/Thesis/Programs/HECGridder/gridder.c=c1508898176000
+/home/adam/Desktop/Thesis/Programs/HECGridder/gridder.c=c1509077672000
 /home/adam/Desktop/git-repos/HECGridder/.git/ORIG_HEAD=c1503880480000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/9c/3020b5de92f28c33416880c05bc5fd562c2576=c1503880227000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/a5/1d9781528043079f34c647e1cd6b6170dec59f=c1503268776000
@@ -117,6 +122,7 @@
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/57/b69fbe7e70f587e977253688329dcce3531ec4=c1504480770000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/66/9b56d0a57a92e7d60791aebbace1798b8878b8=c1505863807000
 /home/adam/NetBeansProjects/Gridder/gridder.h=c1501730359000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/ef/be244fa2a58b0530b751f4ffb5194e0acc5ab0=c1508898342000
 /home/adam/NetBeansProjects/Gridder/gridder.c=c1502235767000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/4c/79fb01bfff265442266714010be69ee31b8f21=c1503270209000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/7e/497bac152380de6131f26fedfe38f51be0c247=c1505863809000
@@ -143,6 +149,7 @@
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/c2/e08e713ea2a5eb90e9083cf9fbf96f362f5710=c1503268776000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/58/9fa25922c846ace47493b4d91a644b0f3ffc8f=c1503880227000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/36/a0cc67f628832c23e0861cdd3a6b3ef0c25897=c1504493822000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/10/0230763697514e3f54c01c73346ed7ee52c4f0=c1508898291000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/refs/remotes/origin/master=c1507068242000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/refs/heads/master=c1507068129000
 /home/adam/Desktop/git-repos/HECGridder/gpu.h=c1504491620000
@@ -160,8 +167,8 @@
 /home/adam/NetBeansProjects/Gridder/nbproject/Makefile-impl.mk=c1501543360000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/3e/dc2d8977c136e0de4681666834363510295ca0=c1503268776000
 /home/adam/Desktop/git-repos/HECGridder/nbproject/Makefile-Debug.mk=c1503880480000
-/home/adam/Desktop/Thesis/Programs/HECGridder/.git/index=c1508804834000
-/home/adam/Desktop/Thesis/Programs/HECGridder/.git/refs/remotes/origin/kernel=c1505864418000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/index=c1508898291000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/refs/remotes/origin/kernel=c1508898382000
 /home/adam/Desktop/Thesis/Programs/HECGridder/nbproject/private/Makefile-variables.mk=c1501543360000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/2f/5f6b949e455a6039cd4746591acbdbfafed6fe=c1503270209000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/refs/heads/master=c1507068129000
@@ -188,10 +195,10 @@
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/ae/f7ea32d6136eaed8d88443d10744f81ca59d8b=c1503880227000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/5e/e626dba5975694bbbf36d2a8ddac3720f9fe1b=c1504480728000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/HEAD=c1507068338000
-/home/adam/Desktop/Thesis/Programs/HECGridder/gpu.h=c1508898078000
+/home/adam/Desktop/Thesis/Programs/HECGridder/gpu.h=c1508986247000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/ORIG_HEAD=c1507068380000
-/home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/refs/remotes/origin/kernel=c1505864418000
-/home/adam/Desktop/Thesis/Programs/HECGridder/.git/refs/heads/kernel=c1507068380000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/refs/remotes/origin/kernel=c1508898382000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/refs/heads/kernel=c1508898342000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/1f/e87db8a1cc34e20a7ae838634c0bb2727fed08=c1503268776000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/5a/63f79d6acbf65df0c2d81583923c42314edac1=c1503880227000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/c5/719df4df601b29d8f799c3e251dd6ad71a8891=c1503880227000
@@ -202,6 +209,7 @@
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/54/70f0436188b49341253655642cd24707f9b426=c1504480728000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/c2/548d20c8fed1cb4042fa2794538d558e670573=c1503268776000
 /home/adam/Desktop/git-repos/HECGridder/.git/logs/refs/remotes/origin/master=c1503880448000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/de/7ce86fb6247d6289cf22a0a8dad67ee377a7ca=c1508898291000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/61/83b3e212c50425c0458350c79462f5f00a5bb8=c1503880227000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/a0/9f32e5ff9b179cf93b8cff9d6921e76360c6d0=c1505863809000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/3a/a4ee39ea5980e3009a01b20ea5309723456921=c1507068099000
@@ -210,11 +218,13 @@
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/c2/e08e713ea2a5eb90e9083cf9fbf96f362f5710=c1503268776000
 /home/adam/Desktop/Thesis/Programs/HECGridder/nbproject/Makefile-Debug.mk=c1508894025000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/58/9fa25922c846ace47493b4d91a644b0f3ffc8f=c1503880227000
-/home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/refs/heads/kernel=c1507068380000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/logs/refs/heads/kernel=c1508898342000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/e3/316eb9a661c0da67aa8c3e59cfe74b9e1deaef=c1505085636000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/d9/5a032268b740940bdd9b420257f23360877ccb=c1504480770000
 /home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/19/72ff524243bc5420c78b59c24a291530de4b42=c1503880272000
 /home/adam/Desktop/git-repos/HECGridder/.git/refs/remotes/origin/filesaving=c1503880304000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/d8/ca71e7c7ba8684f3784f2827dace052ba460f9=c1508898291000
+/home/adam/Desktop/Thesis/Programs/HECGridder/.git/objects/2e/e049a9940fab32f708a9487bcd238f066382a3=c1508898291000
 /home/adam/Desktop/git-repos/HECGridder/.git/objects/1a/f8b06c0232581af8889f12b35b85dc1d967fc4=c1504480770000
 VERSION=1.3
 /home/adam/Desktop/Thesis/Programs/HECGridder/nbproject/Package-Release.bash=c1503880480000
