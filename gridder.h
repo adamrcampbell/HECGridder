@@ -1,17 +1,44 @@
 
-/* 
- * File:   gridder.h
- * Author: adam
- *
- * Created on 1 August 2017, 11:23 AM
- */
-
 #ifndef GRIDDER_H
 #define GRIDDER_H
 
 /*--------------------------------------------------------------------
 *   STRUCTS
 *-------------------------------------------------------------------*/
+typedef struct Config {
+    // General
+    float gridDimension;
+    unsigned int kernelTexSize;
+    unsigned int kernelMaxFullSupport;
+    unsigned int kernelMinFullSupport;
+    unsigned int visibilityCount;
+    unsigned int numVisibilityParams;
+    bool visibilitiesFromFile;
+    char* visibilitySourceFile;
+
+    // GUI
+    unsigned int refreshDelay;
+    unsigned int displayDumpTime;
+    
+    // Prolate Spheroidal
+    double prolateC;
+    double prolateAlpha;
+    unsigned int prolateNumTerms;
+    // Consider what to do with Spheroidal struct
+    // as not required with new method of spheroidal
+    // calculation (no GSL lib required)
+    
+    // W Projection
+    float cellSize;
+    float uvScale;
+    float wScale;
+    float fieldOfView;
+    float wProjectionStep;
+    float wProjectionMaxPlane;
+    float wProjectionMaxW;
+    unsigned int wProjectNumPlanes;
+} Config;
+
 typedef struct FloatComplex {
     float real;
     float imaginary;
@@ -31,14 +58,6 @@ typedef struct SpheroidalFunction {
     double itsSum0;
 } SpheroidalFunction;
 
-/*--------------------------------------------------------------------
-*   ENUMS
-*-------------------------------------------------------------------*/
-enum kernel {
-    RANDOM,
-    KAISER, 
-    PROLATE
-};
 
 /*--------------------------------------------------------------------
 *   FUNCTION DEFINITIONS
@@ -54,9 +73,6 @@ GLuint createProgram(GLuint fragmentShader, GLuint vertexShader);
 void timerEvent(int value);
 float timedifference_msec(struct timeval t0, struct timeval t1);
 void printTimesAverage(struct timeval realStart, int processStart, char description[]);
-float getZeroOrderModifiedBessel(float x);
-float calculateKaiserPoint(float i);
-double calculateKernelWeight(float x);
 void initSpheroidal(void);
 double calculateSpheroidalPoint(const double nu);
 double sumLegendreSeries(const double x, const int m);
@@ -66,21 +82,19 @@ void saveGridToFile(void);
 void loadVisibilitySamples(void);
 void compareToIdealGrid(void);
 void calculateSpheroidalCurve(float * nu, int kernelWidth);
-void wKernelList(void);
+void createWPlanes(void);
 void createWTermLike(int width, FloatComplex wScreen[][width], float w);
-void wBeam(int width, FloatComplex wScreen[][width], float fieldOfView, float w, float centerX, float centerY);
-int digitize(float w, float wmaxabs);
+void wBeam(int width, FloatComplex wScreen[][width], float w, float centerX, float centerY, float fieldOfView);
 void calcSpheroidalCurve(float * curve);
-void fft2DVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
-int* calcBitReversedIndices(int n);
-void populate3DKernel(void);
+void fft2dVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
+void fft2dShift(int numChannels, FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
+void fft2dInverseShift(int numChannels, FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
+void calcBitReversedIndices(int n, int* indices);
 void printGrid(void);
 
 FloatComplex complexAdd(FloatComplex x, FloatComplex y);
 FloatComplex complexSubtract(FloatComplex x, FloatComplex y);
-FloatComplex complexDivide(FloatComplex x, FloatComplex y);
 FloatComplex complexMultiply(FloatComplex x, FloatComplex y);
 FloatComplex complexExponential(float ph);
 
 #endif /* GRIDDER_H */
-

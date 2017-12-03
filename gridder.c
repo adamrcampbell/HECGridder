@@ -6,6 +6,9 @@
  * Created on 1 August 2017, 11:23 AM
  */
 
+//31 million visibilities = 620mb
+//3k squared grid         = 32mb
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -26,57 +29,52 @@
 #include "gridder.h"
 #include "gpu.h"
 
-/*--------------------------------------------------------------------
- *   GLOBAL CONFIG
- *-------------------------------------------------------------------*/
-static float gridDimension;
-static int kernelSize;
-static enum kernel kernelType;
-static int visibilityCount;
-static int visibilityParams;
+
+/*
+ TODO LIST for this week!!
+ * - Make some random depths, ie w depth matches the test data
+ * - W projection properly,
+ * - kernel size properly, work out how W affects kernel size
+ * - get it so that its the HEC gridder converting UVW to grid cords
+ * - config list... Easy to config the gridder for others
+ * - refactor and tidy up code base!!
+ */
+
+/* ASK THE ENZ LIST!
+ 
+ * HOW CAN WE CENTER THIS ON A CENTER PIXEL
+ * 
+ * SHOULD THE GRID BE LINEAR OR NEAREST?? KERNEL OBV LINEAR BUT THE GRID TEX??
+ 
+ */
 
 /*--------------------------------------------------------------------
  *   GUI CONFIG
  *-------------------------------------------------------------------*/
-static int refreshDelay;
 static GLfloat guiRenderBounds[8];
 
-/*--------------------------------------------------------------------
- *   KAISER BESSEL CONFIG
- *-------------------------------------------------------------------*/
-static float kaiserAlpha;
-static float accuracy;
-static float piAlpha;
 
 /*--------------------------------------------------------------------
  *   PROLATE SPHEROIDAL CONFIG
  *-------------------------------------------------------------------*/
-static double prolateC;
-static double prolateAlpha;
-static unsigned int numTerms;
 static struct SpheroidalFunction spheroidal;
-
-/*--------------------------------------------------------------------
- *   W-PROJECTION CONFIG
- *-------------------------------------------------------------------*/
-static float kernelStart;
-static float kernelStep;
-static float wStep;
-static float wMaxAbs;
-static float cellSize;
-static float fieldOfView;
 
 static GLuint sProgram;
 static GLuint sLocPosition;
 static GLuint sComplex;
-static GLuint sLocColor;
+
 static GLuint guiRenderBoundsBuffer;
 static GLuint visibilityBuffer;
-
 static GLuint sLocPositionRender;
 static GLuint sProgramRender;
 static GLuint uShaderTextureHandle;
-static GLuint uShaderTextureKernalHandle;
+static GLuint uShaderTextureKernalHandle; 
+static GLuint uMinSupportOffset;
+static GLuint uWToMaxSupportRatio;
+static GLuint uGridSize;
+static GLuint uGridSizeRender;
+static GLuint uWScale;
+static GLuint uUVScale; 
 
 static GLuint fboID;
 static GLuint textureID;
@@ -88,7 +86,6 @@ static GLuint* visibilityIndices;
 static GLfloat* visibilities;
 
 int iterationCount = 0;
-const int dumpTime = 1;
 
 int counter =0;
 int counterAverage;
@@ -97,59 +94,65 @@ float sumTimeProcess;
 int val;
 struct timeval timeCallsReal;
 int timeCallsProcess;
-bool toggle = 0;
+bool toggle = 0;  
+int windowDisplay;
 
-const int windowDisplay = 800;
+// W projection and gridding configuration
+Config config;
+
 
 void initConfig(void) {
     // Global
-    gridDimension = 15.0f;
-    kernelSize = 11;
-    kernelType = PROLATE;
-    visibilityCount = 1;
-    visibilityParams = 5;
-
+    windowDisplay = 900;
+    config.kernelTexSize = 128;
+    config.gridDimension = 18000.0f;
+    config.kernelMaxFullSupport = (44.0f * 2.0f) + 1.0f;
+    config.kernelMinFullSupport = (4.0f * 2.0f) + 1.0f;
+    config.visibilityCount = 1;
+    // config.visibilityCount = 1;//31395840;
+    config.numVisibilityParams = 5;
+    config.visibilitiesFromFile = true;
+    config.displayDumpTime = 10;
+    config.visibilitySourceFile = "el82-70.txt"; //"el82-70_vis.txt";
     // Gui
-    refreshDelay = 500;
+    config.refreshDelay = 0;
     GLfloat renderTemp[8] = {
-        0.0f, 0.0f,
-        0.0f, gridDimension,
-        gridDimension, 0.0f,
-        gridDimension, gridDimension
+        -config.gridDimension/2.0f, -config.gridDimension/2.0f,
+        -config.gridDimension/2.0f, config.gridDimension/2.0f,
+        config.gridDimension/2.0f, -config.gridDimension/2.0f,
+        config.gridDimension/2.0f, config.gridDimension/2.0f
     };
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
     
-    // Kaiser
-    kaiserAlpha = 2.59f;
-    accuracy = 1E-12;
-    piAlpha = M_PI * kaiserAlpha;
-    
     // Prolate
-    prolateC = 3 * M_PI;
-    prolateAlpha = 1;
-    numTerms = 16; // default: 16
+    config.prolateC = 3 * M_PI;
+    config.prolateAlpha = 1;
+    config.prolateNumTerms = 16; // default: 16
     
     // W-Projection
-    kernelStart = (-1.0 + (1.0/(float)kernelSize));
-    kernelStep = (2.0f/(float)kernelSize);
-    wStep = 1000.0f;
-    wMaxAbs = 25000.0f;
-    cellSize = 0.01f;
-    fieldOfView = cellSize * (float) kernelSize; 
+    config.wProjectionMaxW = 7000.0f;
+    config.wProjectionMaxPlane = 339.0f; //714
+    config.wScale = (config.wProjectionMaxPlane * config.wProjectionMaxPlane) / config.wProjectionMaxW;
+    config.wProjectionStep = config.wProjectionMaxW / config.wScale;
+//    config.wProjectNumPlanes = (unsigned int) ceilf((fabsf(config.wProjectionMaxW)*2+config.wProjectionStep)/config.wProjectionStep);
+    config.cellSize = 0.000006;
+    config.fieldOfView = config.cellSize * config.gridDimension; 
 }
 
 void initGridder(void) {
-   
-    kernelBuffer = malloc(sizeof (FloatComplex) * kernelSize * kernelSize * 3);
-    if(kernelType == PROLATE)
-        initSpheroidal();
+    
+    kernelBuffer = malloc(sizeof (FloatComplex) * config.kernelTexSize * config.kernelTexSize * (config.wProjectionMaxPlane+1.0f));
+//    createWPlanes();
+//    exit(0);
+    
+    initSpheroidal();
     
     glClampColorARB(GL_CLAMP_VERTEX_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_READ_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
 
     srand(time(NULL));
-    int size = 4 * gridDimension*gridDimension;
+    int size = 4 * config.gridDimension*config.gridDimension;
     gridBuffer = (GLfloat*) malloc(sizeof (GLfloat) * size);
 
     for (int i = 0; i < size; i += 4) {
@@ -159,29 +162,72 @@ void initGridder(void) {
         gridBuffer[i + 3] = 0.0f;
     }
 
-    visibilities = malloc(sizeof (GLfloat) * visibilityParams * visibilityCount);
-    visibilityIndices = malloc(sizeof (GLuint) * visibilityCount);
+    if(config.visibilitiesFromFile)
+    {
+        FILE *file = fopen(config.visibilitySourceFile, "r");
+        
+        if(file != NULL)
+        {
+            int visCount = 0;
+            fscanf(file, "%d\n", &visCount);
+            config.visibilityCount = visCount;
+            printf("READING %d number of visibilities from file ",config.visibilityCount);
+            visibilities = malloc(sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount);
+            float temp_uu, temp_vv, temp_ww = 0.0f;
+            float temp_real, temp_imag = 0.0f;
+            for(int i = 0; i < config.visibilityCount * config.numVisibilityParams; i+=config.numVisibilityParams)
+            {
+                fscanf(file, "%f %f %f %f %f\n", &temp_uu, &temp_vv, &temp_ww, &temp_real, &temp_imag);
+                
+//                int randomKernel = (int)((float)rand()/RAND_MAX * 44)+44;
+//
+//                while(randomKernel % 2 == 0)
+//                {
+//                    randomKernel = (int)((float)rand()/RAND_MAX * 44)+44;
+//                }
+                
+                visibilities[i] = temp_uu;
+                visibilities[i + 1] = temp_vv;
+                visibilities[i + 2] = temp_ww;//(float) randomKernel;//37.0f; //temp_ww;
+                visibilities[i + 3] = temp_real; // remove abs
+                visibilities[i + 4] = temp_imag; // remove abs
+            }
+            
+            fclose(file);
+        }
+        else
+            printf("NO VISIBILITY FILE\n");
+    }
+    else
+        visibilities = malloc(sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount);
+    
+    visibilityIndices = malloc(sizeof (GLuint) * config.visibilityCount);
 
-    for (GLuint i = 0; i < visibilityCount; i++) {
+    for (GLuint i = 0; i < config.visibilityCount; i++) {
         visibilityIndices[i] = i;
     }
     
-    char buffer[2000];
-    sprintf(buffer, VERTEX_SHADER, gridDimension);
-    GLuint vertexShader = createShader(GL_VERTEX_SHADER, buffer);
+   // char buffer[2000];
+    //sprintf(buffer, VERTEX_SHADER, config.gridDimension);
+    GLuint vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER);
     GLuint fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
     sProgram = createProgram(vertexShader, fragmentShader);
     sLocPosition = glGetAttribLocation(sProgram, "position");
     sComplex = glGetAttribLocation(sProgram, "complex");
     uShaderTextureKernalHandle = glGetUniformLocation(sProgram, "kernalTex");
-    
-    sprintf(buffer, VERTEX_SHADER_RENDER, gridDimension);
-    vertexShader = createShader(GL_VERTEX_SHADER, buffer);
+    uMinSupportOffset = glGetUniformLocation(sProgram, "minSupportOffset");
+    uWToMaxSupportRatio = glGetUniformLocation(sProgram, "wToMaxSupportRatio");
+    uGridSize = glGetUniformLocation(sProgram, "gridSize");
+    uWScale = glGetUniformLocation(sProgram, "wScale");
+    uUVScale = glGetUniformLocation(sProgram, "uvScale");
+
+   // sprintf(buffer, VERTEX_SHADER_RENDER, config.gridDimension);
+    vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER_RENDER);
     fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_RENDER);
     sProgramRender = createProgram(vertexShader, fragmentShader);
     sLocPositionRender = glGetAttribLocation(sProgramRender, "position");
     uShaderTextureHandle = glGetUniformLocation(sProgramRender, "destTex");
-    
+    uGridSizeRender = glGetUniformLocation(sProgramRender, "gridSize");
     glGenBuffers(1, &guiRenderBoundsBuffer);
     glBindBuffer(GL_ARRAY_BUFFER, guiRenderBoundsBuffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 8, guiRenderBounds, GL_STATIC_DRAW);
@@ -195,12 +241,12 @@ void initGridder(void) {
     glGenTextures(2, idArray);
     textureID = idArray[0];
     glBindTexture(GL_TEXTURE_2D, textureID);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_2D);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, gridDimension, gridDimension, 0, GL_RGBA, GL_FLOAT, gridBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, config.gridDimension, config.gridDimension, 0, GL_RGBA, GL_FLOAT, gridBuffer);
 
     glGenFramebuffers(1, idArray);
     fboID = idArray[0];
@@ -209,7 +255,7 @@ void initGridder(void) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     
-    for(int i = 0; i < 3; i++)
+    for(int i = 0; i < config.wProjectionMaxPlane; i++)
         createKernel(i);
     
     //kernal TEXTURE
@@ -222,12 +268,15 @@ void initGridder(void) {
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_3D);
     // width, height, depth
-    glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, kernelSize, kernelSize, 3, 0, GL_RG, GL_FLOAT, kernelBuffer);
+    glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize, config.kernelTexSize, (int) config.wProjectionMaxPlane, 0, GL_RG, GL_FLOAT, kernelBuffer);
     glBindTexture(GL_TEXTURE_3D, 0);
     
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
     glEnable(GL_POINT_SPRITE);
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
+    
+    
+    setShaderUniforms();
     
     counter = 0;
     sumTimeProcess = 0.0f;
@@ -235,27 +284,42 @@ void initGridder(void) {
     timeCallsProcess = clock();
 }
 
+
+void setShaderUniforms()
+{
+    printf("SETTING THE SHADER UNIFORMS\n");
+    glUseProgram(sProgram);
+    glUniform1f(uMinSupportOffset, config.kernelMinFullSupport);
+    glUniform1f(uWToMaxSupportRatio, (config.kernelMaxFullSupport-config.kernelMinFullSupport)/config.wProjectionMaxW); //(maxSuppor-minSupport) / maxW
+    glUniform1f(uGridSize, config.gridDimension);
+    glUniform1f(uWScale, config.wScale);
+    glUniform1f(uUVScale, config.fieldOfView * 3.5);
+    glUseProgram(0);
+    
+    glUseProgram(sProgramRender);
+    glUniform1f(uGridSizeRender, config.gridDimension);
+    glUseProgram(0);  
+     printf("DONE WITH SETTING THE SHADER UNIFORMS\n");
+}
+
+
 void runGridder(void) {
     
-    for (int i = 0; i < visibilityCount * visibilityParams; i += visibilityParams) {
-        
-//        int randomKernel = (int)((float)rand()/RAND_MAX * 121)+7;
-//        
-//        while(randomKernel % 2 == 0)
-//        {
-//            randomKernel = (int)((float)rand()/RAND_MAX * 121)+7;
-//        }
-        
-        visibilities[i] = (float) 6;//(rand() % (int) gridDimension);
-        visibilities[i + 1] = (float) 6;// (rand() % (int) gridDimension);
-        visibilities[i + 2] = (float) kernelSize;
-        visibilities[i + 3] = ((float)rand()/RAND_MAX * 2.0f)-1.0f;
-        visibilities[i + 4] = ((float)rand()/RAND_MAX * 2.0f)-1.0f;
+    if(!config.visibilitiesFromFile)
+    {
+        for (int i = 0; i < config.visibilityCount * config.numVisibilityParams; i += config.numVisibilityParams) {
+
+            visibilities[i] = 0.0f;//(float) (rand() % (int) config.gridDimension);
+            visibilities[i + 1] = 0.0f;//(float) (rand() % (int) config.gridDimension);
+            visibilities[i + 2] = 1000.0f;//(float) randomKernel;
+            visibilities[i + 3] = 1.0f;//((float)rand()/RAND_MAX * 2.0f)-1.0f;
+            visibilities[i + 4] = 1.0f;//((float)rand()/RAND_MAX * 2.0f)-1.0f;
+        }
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, fboID);
     glEnable(GL_BLEND);
-    glViewport(0, 0, gridDimension, gridDimension);
+    glViewport(0, 0, config.gridDimension, config.gridDimension);
 
     struct timeval timeFunctionReal;
     gettimeofday(&timeFunctionReal, 0);
@@ -275,14 +339,25 @@ void runGridder(void) {
 
     //glBindBuffer(GL_ARRAY_BUFFER, guiRenderBoundsBuffer);
     glBindBuffer(GL_ARRAY_BUFFER, visibilityBuffer);
-    glBufferData(GL_ARRAY_BUFFER, sizeof (GLfloat) * visibilityParams * visibilityCount, visibilities, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount, visibilities, GL_STATIC_DRAW);
     glEnableVertexAttribArray(sLocPosition);
-    glVertexAttribPointer(sLocPosition, 3, GL_FLOAT, GL_FALSE, visibilityParams*sizeof(GLfloat), 0);
+    glVertexAttribPointer(sLocPosition, 3, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), 0);
     glEnableVertexAttribArray(sComplex);
-    glVertexAttribPointer(sComplex, 2, GL_FLOAT, GL_FALSE, visibilityParams*sizeof(GLfloat), (void*) (3*sizeof(GLfloat)));
+    glVertexAttribPointer(sComplex, 2, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), (void*) (3*sizeof(GLfloat)));
 
-    glDrawElements(GL_POINTS, visibilityCount, GL_UNSIGNED_INT, visibilityIndices);
-
+//    int batchSize = config.visibilityCount/16;
+//    int end = batchSize;
+//    int start = 0;
+//    for(int i=0;i<16;i++)
+//    {
+//        glDrawArrays(GL_POINTS, start, end);
+//       // glFinish();
+//        start += batchSize;
+//        end +=batchSize;
+//    }
+    
+    glDrawArrays(GL_POINTS, 0, config.visibilityCount);
+     
     for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError()) {
         fprintf(stderr, "%d: %s\n", err, gluErrorString(err));
     }
@@ -297,17 +372,13 @@ void runGridder(void) {
     
     iterationCount++;
     
-    if(iterationCount == dumpTime)
-    {
-        iterationCount = 0;
-        printGrid();
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    }
     
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     //glPopAttrib();
 
+        
+   glFlush();
+   glFinish();
     //DRAW RENDERING
      glViewport(0, 0, windowDisplay, windowDisplay);
     glUseProgram(sProgramRender);
@@ -329,89 +400,75 @@ void runGridder(void) {
     glUseProgram(0);
 
     counter++;
+ 
+    if(iterationCount == config.displayDumpTime)
+    {   glFlush();
+        glFinish();
+        glBindFramebuffer(GL_FRAMEBUFFER, fboID);
+        iterationCount = 0;
+        printGrid();
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    glFlush();
+    glFinish();
     
     glutSwapBuffers();
-    
-    printTimesAverage(timeFunctionReal,timeFunctionProcess,"ENTIRE FUNCTION TIME");
+       printTimesAverage(timeFunctionReal,timeFunctionProcess,"ENTIRE FUNCTION TIME");
     gettimeofday(&timeCallsReal, 0);
     timeCallsProcess = clock();
+     
 }
 
 void printGrid(void)
 {
     glFinish();
-    glReadPixels(0, 0, gridDimension, gridDimension, GL_RGBA, GL_FLOAT, gridBuffer);
-
-    printf("Sampled Grid\n");
-    for(int row = 0; row < gridDimension; row++)
-    {
-        for(int col = 0; col < ((gridDimension)*4); col+=4)
-        {
-            float r = gridBuffer[(row*(int)gridDimension*4)+col];
-//            float g = gridBuffer[(row*(int)gridDimension*4)+col+1];
-//            float b = gridBuffer[(row*(int)gridDimension*4)+col+2];
-//            float a = gridBuffer[(row*(int)gridDimension*4)+col+3];
-            
-            printf("%f ", r);
-
-        }
-        printf("\n");
-    }
-    printf("\n");
+    glReadPixels(0, 0, config.gridDimension, config.gridDimension, GL_RGBA, GL_FLOAT, gridBuffer);
+    glFinish();
+    int printSUM = 12;//config.gridDimension;//
+//    //printf("Sampled Grid\n");
+//    for(int row = 0; row < config.gridDimension; row++)
+//    {
+//        for(int col = 0; col < (config.gridDimension*4); col+=4)
+//        {
+//            float r = gridBuffer[(row*(int)config.gridDimension*4)+col];
+//            float g = gridBuffer[(row*(int)config.gridDimension*4)+col+1];
+////            float b = gridBuffer[(row*(int)config.gridDimension*4)+col+2];
+////            float a = gridBuffer[(row*(int)config.gridDimension*4)+col+3];
+//           // if(r > 0.001 || g > 0.001)
+//               printf("(%.2f)",r);
+//
+//        }
+//        printf("\n");
+//    }
+    printf("\nTransfered back completed!!!!!!!!\n");
 }
 
 void createKernel(int depth)
 {   
-    float start = -1.0 + (1.0/(float)kernelSize);
-    float step = 2.0f/(float)kernelSize;
+    float start = -1.0 + (1.0/(float)config.kernelTexSize);
+    float step = 2.0f/(float)config.kernelTexSize;
     
-//    if(kernelType == KAISER)
-//    {
-//        for (int row = 0; row < kernelSize; row++) {
-//            
-//            float rowKernelWeight = calculateKernelWeight(start+(row*step));
-//            
-//            for (int col = 0, c = 0; col < kernelSize; col++, c++) {
-//                
-//                kernelBuffer[(depth * kernelSize * kernelSize) + kernelSize * row + col].real = rowKernelWeight * calculateKernelWeight(start+(col*step));
-//                kernelBuffer[(depth * kernelSize * kernelSize) + kernelSize * row + col].imaginary = 1.0f;
-//                // printf("%f ", kernelBuffer[(int) kernelSize * row + col]);
-//            }
-//            // printf("\n");
-//        }
-//    }
-//    else if(kernelType == PROLATE)
-//    {
-        float * curve = malloc(sizeof(float) * kernelSize);
-        
-        for(int i = 0; i < kernelSize; i++)
-            curve[i] = start+(i*step);
-        
-        calculateSpheroidalCurve(curve, kernelSize);
-        
-        for(int row = 0; row < kernelSize; row++)
-        {   
-            for(int col = 0; col < kernelSize; col++)
-            {
-                kernelBuffer[(depth * kernelSize * kernelSize) + kernelSize * row + col].real = curve[row] * curve[col];
-                kernelBuffer[(depth * kernelSize * kernelSize) + kernelSize * row + col].imaginary = (float) depth;
-                //printf("%f ", kernelBuffer[(depth * kernelSize * kernelSize) + kernelSize * row + col].real);
-            }
-            // printf("\n");
+    float * curve = malloc(sizeof(float) * config.kernelTexSize);
+
+    for(int i = 0; i < config.kernelTexSize; i++)
+        curve[i] = start+(i*step);
+
+    calculateSpheroidalCurve(curve, config.kernelTexSize);
+
+    for(int row = 0; row < config.kernelTexSize; row++)
+    {   
+        for(int col = 0; col < config.kernelTexSize; col++)
+        {
+            kernelBuffer[(depth * config.kernelTexSize * config.kernelTexSize) + config.kernelTexSize * row + col].real = curve[row] * curve[col];
+            kernelBuffer[(depth * config.kernelTexSize * config.kernelTexSize) + config.kernelTexSize * row + col].imaginary = (float) depth;
+            //printf("%f ", kernelBuffer[(depth * config.kernelFullSupport * config.kernelFullSupport) + config.kernelFullSupport * row + col].real);
         }
         // printf("\n");
-        free(curve);
-//    }
-//    else
-//        printf("ERROR: Unsupported kernel type\n");
-}
-
-double calculateKernelWeight(float x)
-{   
-    if(kernelType == KAISER)
-        return calculateKaiserPoint(x);
-    else if(kernelType == PROLATE)
-        return calculateSpheroidalPoint(x);
+    }
+    // printf("\n");
+    free(curve);
 }
 
 int main(int argc, char** argv) {
@@ -424,9 +481,9 @@ int main(int argc, char** argv) {
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
     glutInitWindowSize(windowDisplay, windowDisplay);
     glutInitWindowPosition(0, 0);
-    glutCreateWindow("Derp Gridder");
+    glutCreateWindow("HEC Gridder");
     glutDisplayFunc(runGridder);
-    glutTimerFunc(refreshDelay, timerEvent, 0);
+    glutTimerFunc(config.refreshDelay, timerEvent, 0);
     //glewInit();
     glewExperimental = GL_TRUE;
     GLenum err = glewInit();
@@ -437,35 +494,6 @@ int main(int argc, char** argv) {
     initGridder();
     glutMainLoop();
     return (EXIT_SUCCESS);
-}
-
-float calculateKaiserPoint(float i) {
-    if (i <= -1. || i >= 1.)
-        return 0;
-
-    float innerTerm = 2.0 * (i + 1.0) / 2 - 1;
-    float x = piAlpha * sqrt(1 - innerTerm * innerTerm);
-    float temp = getZeroOrderModifiedBessel(x) / getZeroOrderModifiedBessel(piAlpha);
-    return temp;
-}
-
-float getZeroOrderModifiedBessel(float x) {
-    float sum = 0;
-    float term = 1;
-    int m = 0;
-
-    do {
-        term = 1.0;
-
-        for (int i = 1; i <= m; i++)
-            term *= x / (2.0 * i);
-
-        term *= term;
-        sum += term;
-        m++;
-    } while (fabsf(term / sum) > accuracy);
-
-    return sum;
 }
 
 void calculateSpheroidalCurve(float * nu, int kernelWidth)
@@ -552,7 +580,7 @@ double sumLegendreSeries(const double x, const int m)
 void fillHelperMatrix(gsl_matrix *B, const int m)
 {
 
-    const double cSquared = prolateC*prolateC;
+    const double cSquared = config.prolateC*config.prolateC;
     
     for(unsigned int row = 0; row < B->size1; ++row) {
         const int r = ((int) row) * 2 + (spheroidal.itsREven ? 0 : 1);
@@ -622,17 +650,17 @@ double fillLegendreCoeffs(const gsl_matrix *B)
 
 void initSpheroidal(void)
 {
-    spheroidal.itsAlpha = prolateAlpha;
+    spheroidal.itsAlpha = config.prolateAlpha;
     spheroidal.itsREven = true;
-    spheroidal.itsCoeffs = gsl_vector_alloc(numTerms);
+    spheroidal.itsCoeffs = gsl_vector_alloc(config.prolateNumTerms);
     
-    gsl_matrix *hlp = gsl_matrix_alloc(numTerms, numTerms);
+    gsl_matrix *hlp = gsl_matrix_alloc(config.prolateNumTerms, config.prolateNumTerms);
     
-    fillHelperMatrix(hlp, (int) prolateAlpha);
+    fillHelperMatrix(hlp, (int) config.prolateAlpha);
     
     fillLegendreCoeffs(hlp);
     
-    spheroidal.itsSum0 = sumLegendreSeries(0, (int) prolateAlpha);
+    spheroidal.itsSum0 = sumLegendreSeries(0, (int) config.prolateAlpha);
 }
 
 double calculateSpheroidalPoint(const double nu)
@@ -648,7 +676,7 @@ double calculateSpheroidalPoint(const double nu)
 
 void timerEvent(int value) {
     glutPostRedisplay();
-    glutTimerFunc(refreshDelay, timerEvent, 0);
+    glutTimerFunc(config.refreshDelay, timerEvent, 0);
 }
 
 float timedifference_msec(struct timeval t0, struct timeval t1)
@@ -740,83 +768,111 @@ GLuint createProgram(GLuint fragmentShader, GLuint vertexShader) {
     return program;
 }
 
-void wKernelList(void)
-{   
-    float * curve = malloc(sizeof(float) * kernelSize);
+void createWPlanes(void)
+{       
+    float maxW = 500.0f;
+    float wStep = 100.0f;
+    int numPlanes = 6;//(int) config.wProjectionMaxPlane + 1.0f;
+    
+    float start = -1.0 + (1.0/(float)config.kernelTexSize);
+    float step = 2.0f/(float)config.kernelTexSize;
+    
+    float * curve = malloc(sizeof(float) * config.kernelTexSize);
     // Calculate steps
-    for(int i = 0; i < kernelSize; i++)
-        curve[i] = kernelStart+(i*kernelStep);
+    for(int i = 0; i < config.kernelTexSize; i++)
+        curve[i] = start+(i*step);
     // Calculate curve from steps
     calcSpheroidalCurve(curve);
-    FloatComplex spheroidal2d[kernelSize][kernelSize];
+    FloatComplex spheroidal2d[config.kernelTexSize][config.kernelTexSize];
     // Populate 2d complex spheroidal
-    for(int r = 0; r < kernelSize; r++)
-        for(int c = 0; c < kernelSize; c++)
+    for(int r = 0; r < config.kernelTexSize; r++)
+    {
+        for(int c = 0; c < config.kernelTexSize; c++)
         {
             spheroidal2d[r][c].real = curve[r] * curve[c];
             spheroidal2d[r][c].imaginary = curve[r] * curve[c];
-        }
+            //printf("%.3f ", spheroidal2d[r][c].real);
+        }   
+        //printf("\n");
+    }
     
     free(curve);
     
-    printf("wKernelList: Max abs w: %.1f, step is %.1f wavelengths\n", wMaxAbs, wStep);
+    printf("createWPlanes: Max w: %.1f, step is %.1f wavelengths\n", maxW, wStep);
     
-    int numWSteps = digitize(wMaxAbs*2, wStep);
-    float wList[numWSteps];
-    float wIncrement = -wMaxAbs;
-    for(int i = 0; i < numWSteps; i++, wIncrement += wStep)
+    float wList[numPlanes];
+    float wIncrement = 0.0f;
+    for(int i = 0; i < numPlanes; i++, wIncrement += wStep)
         wList[i] = wIncrement;
     
-    FloatComplex wTemplate[kernelSize][kernelSize];
-    for(int r = 0; r < kernelSize; r++)
-        for(int c = 0; c < kernelSize; c++)
-        {
-            wTemplate[r][c].real = 0.0f;
-            wTemplate[r][c].imaginary = 0.0f;
-        }
+    // Dissolve 3d array into 2d array (kernelFullSupport x wProjectNumPlanes)
+    FloatComplex wKernelList[numPlanes][(int)config.kernelTexSize][(int)config.kernelTexSize];
     
-    // 3d storage of padded 2d kernels
-    FloatComplex kernels[numWSteps][kernelSize][kernelSize];
-    
-    for(int i = 0; i < numWSteps; i++)
+    for(int i = 0; i < numPlanes; i++)
     {
         // Create w screen
-        FloatComplex wScreen[kernelSize][kernelSize];
-        for(int r = 0; r < kernelSize; r++)
-            for(int c = 0; c < kernelSize; c++)
+        FloatComplex wScreen[config.kernelTexSize][config.kernelTexSize];
+        FloatComplex inverseShiftOutput[config.kernelTexSize][config.kernelTexSize];
+        FloatComplex fftResult[config.kernelTexSize][config.kernelTexSize];
+        FloatComplex shiftOutput[config.kernelTexSize][config.kernelTexSize];
+        for(int r = 0; r < config.kernelTexSize; r++)
+            for(int c = 0; c < config.kernelTexSize; c++)
             {
                 wScreen[r][c].real = 0.0f;
                 wScreen[r][c].imaginary = 0.0f;
+                inverseShiftOutput[r][c].real = 0.0f;
+                inverseShiftOutput[r][c].imaginary = 0.0f;
+                fftResult[r][c].real = 0.0f;
+                fftResult[r][c].imaginary = 0.0f;
+                shiftOutput[r][c].real = 0.0f;
+                shiftOutput[r][c].imaginary = 0.0f;
             }
         
-        createWTermLike(kernelSize, wScreen, wList[i]);
+        createWTermLike(config.gridDimension, wScreen, wList[i]);
         
-        for(int r = 0; r < kernelSize; r++)
-            for(int c = 0; c < kernelSize; c++)
+        for(int r = 0; r < config.kernelTexSize; r++)
+            for(int c = 0; c < config.kernelTexSize; c++)
             {
                 // Complex multiplication
                 wScreen[r][c] = complexMultiply(wScreen[r][c], spheroidal2d[r][c]);
             }
         
+        // Inverse shift FFT for transformation
+        fft2dInverseShift(config.kernelTexSize, wScreen, inverseShiftOutput);
+        
         // FFT image
-        FloatComplex result[kernelSize][kernelSize];
-        fft2DVectorRadixTransform(kernelSize, wScreen, result);
+        fft2dVectorRadixTransform(config.kernelTexSize, inverseShiftOutput, fftResult);
+        
+        // Inverse shift FFT'd result
+        fft2dShift(config.kernelTexSize, fftResult, shiftOutput);
         
         // Append to list of kernels
-        for(int r = 0; r < kernelSize; r++)
-            for(int c = 0; c < kernelSize; c++)
-                kernels[i][r][c] = result[r][c];
+        for(int r = 0; r < config.kernelTexSize; r++)
+        {
+            for(int c = 0; c < config.kernelTexSize; c++)
+            {
+                wKernelList[i][r][c] = shiftOutput[r][c];
+                printf("%20.3f ", shiftOutput[r][c].imaginary);
+            }
+             printf("\n");   
+        }
+        printf("\n\n");
     }
+    
+    // Copy to kernel buffer global
+    
 }
 
 void createWTermLike(int width, FloatComplex wScreen[][width], float w)
 {    
+    float fieldOfView = 0.001f * config.gridDimension;
+    
     float fresnel = fabsf(w) * ((0.5 * fieldOfView)*(0.5 * fieldOfView));
     printf("CreateWTermLike: For w = %f, field of view = %f, fresnel number = %f\n", w, fieldOfView, fresnel);
-    wBeam(width, wScreen, fieldOfView, w, width/2, width/2);
+    wBeam(width, wScreen, w, width/2, width/2, fieldOfView);
 }
 
-void wBeam(int width, FloatComplex wScreen[][width], float fieldOfView, float w, float centerX, float centerY)
+void wBeam(int width, FloatComplex wScreen[][width], float w, float centerX, float centerY, float fieldOfView)
 {
     float r2[width][width];
     float ph[width][width];
@@ -839,7 +895,9 @@ void wBeam(int width, FloatComplex wScreen[][width], float fieldOfView, float w,
         for(int c = 0; c < width; c++)
         {
             if(r2[r][c] < 1.0f)
-                wScreen[r][c] = complexExponential(ph[r][c]);
+            {
+                wScreen[r][c] = complexExponential(ph[r][c]);   
+            }
             else if(r2[r][c] == 0.0f)
                 wScreen[r][c] = (FloatComplex) {.real = 1.0f, .imaginary = 0.0f};
             else
@@ -848,15 +906,11 @@ void wBeam(int width, FloatComplex wScreen[][width], float fieldOfView, float w,
     }
 }
 
-int digitize(float w, float wmaxabs)
-{
-    return (int) ceilf((w+wmaxabs)/wStep);
-}
-
-void fft2DVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels])
+void fft2dVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels])
 {   
     // Calculate bit reversed indices
-    int* bitReversedIndices = calcBitReversedIndices(numChannels);
+    int* bitReversedIndices = malloc(sizeof(int) * numChannels);
+    calcBitReversedIndices(numChannels, bitReversedIndices);
     
     // Copy data to result for processing
     for(int r = 0; r < numChannels; r++)
@@ -896,19 +950,17 @@ void fft2DVectorRadixTransform(int numChannels, const FloatComplex input[][numCh
                         output[k+i][l+j+m/2] = complexAdd(temp01, temp11);
                         output[k+i+m/2][l+j] = complexSubtract(temp00, temp10);
                         output[k+i+m/2][l+j+m/2] = complexSubtract(temp01, temp11);
-                        y = complexAdd(y, complexMultiply(y, omegaM));
+                        y = complexMultiply(y, omegaM);
                     }
-                    x = complexAdd(x, complexMultiply(x, omegaM));
+                    x = complexMultiply(x, omegaM);
                 }
             }
         }
     }
 }
 
-int* calcBitReversedIndices(int n)
-{
-    int* indices = malloc(n * sizeof(int));
-    
+void calcBitReversedIndices(int n, int* indices)
+{   
     for(int i = 0; i < n; i++)
     {
         // Calculate index r to which i will be moved
@@ -922,8 +974,50 @@ int* calcBitReversedIndices(int n)
         }
         indices[i] = r;
     }
-    
-    return indices;
+}
+
+void fft2dShift(int numChannels, FloatComplex input[][numChannels], FloatComplex shifted[][numChannels]) 
+{
+    for(int i = 0; i < numChannels; i++)
+    {
+        for(int j = 0; j < numChannels; j++)
+        {            
+            // Top-left
+            if(i < numChannels/2 && j < numChannels/2)
+                shifted[i+numChannels/2][j+numChannels/2] = input[i][j];
+            // Bottom-left
+            else if(i >= numChannels/2 && j < numChannels/2)
+                shifted[i-numChannels/2][j+numChannels/2] = input[i][j];
+            // Top-right
+            else if(i < numChannels/2 && j >= numChannels/2)
+                shifted[i+numChannels/2][j-numChannels/2] = input[i][j];
+            // Bottom-right
+            else
+                shifted[i-numChannels/2][j-numChannels/2] = input[i][j];
+        }
+    }
+}
+
+void fft2dInverseShift(int numChannels, FloatComplex input[][numChannels], FloatComplex inverse[][numChannels]) 
+{
+    for(int i = 0; i < numChannels; i++)
+    {
+        for(int j = 0; j < numChannels; j++)
+        {            
+            // Top-left
+            if(i < numChannels/2 && j < numChannels/2)
+                inverse[i+numChannels/2][j+numChannels/2] = input[i][j];
+            // Bottom-left
+            else if(i >= numChannels/2 && j < numChannels/2)
+                inverse[i-numChannels/2][j+numChannels/2] = input[i][j];
+            // Top-right
+            else if(i < numChannels/2 && j >= numChannels/2)
+                inverse[i+numChannels/2][j-numChannels/2] = input[i][j];
+            // Bottom-right
+            else
+                inverse[i-numChannels/2][j-numChannels/2] = input[i][j];
+        }
+    }
 }
 
 FloatComplex complexAdd(FloatComplex x, FloatComplex y)
@@ -939,14 +1033,6 @@ FloatComplex complexSubtract(FloatComplex x, FloatComplex y)
     FloatComplex z;
     z.real = x.real - y.real;
     z.imaginary = x.imaginary - y.imaginary;
-    return z;
-}
-
-FloatComplex complexDivide(FloatComplex x, FloatComplex y)
-{
-    FloatComplex z;
-    z.real = (x.real*y.real + x.imaginary*y.imaginary)/(y.real*y.real+y.imaginary*y.imaginary);
-    z.imaginary = (x.imaginary*y.real - x.real*y.imaginary)/(y.real*y.real + y.imaginary*y.imaginary);
     return z;
 }
 
@@ -974,12 +1060,12 @@ void calcSpheroidalCurve(float * curve)
     int pNum = 5;
     int qNum = 3;
     
-    for(int i = 0; i < kernelSize; i++)
+    for(int i = 0; i < config.kernelTexSize; i++)
         curve[i] = fabsf(curve[i]);
     
-    int part[kernelSize];
-    float nuend[kernelSize];
-    for(int i = 0; i < kernelSize; i++)
+    int part[config.kernelTexSize];
+    float nuend[config.kernelTexSize];
+    for(int i = 0; i < config.kernelTexSize; i++)
     {
         if(curve[i] >= 0.0f && curve[i] <= 0.75f)
             part[i] = 0;
@@ -992,47 +1078,32 @@ void calcSpheroidalCurve(float * curve)
             nuend[i] = 1.0f;      
     }
     
-    float delnusq[kernelSize];
-    for(int i = 0; i < kernelSize; i++)
+    float delnusq[config.kernelTexSize];
+    for(int i = 0; i < config.kernelTexSize; i++)
         delnusq[i] = (curve[i] * curve[i]) - (nuend[i] * nuend[i]);
     
-    float top[kernelSize];
-    for(int i = 0; i < kernelSize; i++)
+    float top[config.kernelTexSize];
+    for(int i = 0; i < config.kernelTexSize; i++)
         top[i] = p[part[i]][0];
     
     for(int i = 1; i < pNum; i++)
-        for(int y = 0; y < kernelSize; y++)
+        for(int y = 0; y < config.kernelTexSize; y++)
             top[y] += (p[part[y]][i] * pow(delnusq[y], i)); 
     
-    float bottom[kernelSize];
-    for(int i = 0; i < kernelSize; i++)
+    float bottom[config.kernelTexSize];
+    for(int i = 0; i < config.kernelTexSize; i++)
         bottom[i] = q[part[i]][0];
     
     for(int i = 1; i < qNum; i++)
-        for(int y = 0; y < kernelSize; y++)
+        for(int y = 0; y < config.kernelTexSize; y++)
             bottom[y] += (q[part[y]][i] * pow(delnusq[y], i));
     
-    for(int i = 0; i < kernelSize; i++)
+    for(int i = 0; i < config.kernelTexSize; i++)
     {   
         float absCurve = abs(curve[i]);
         curve[i] = (bottom[i] > 0.0f) ? top[i]/bottom[i] : 0.0f;
         if(absCurve > 1.0f)
             curve[i] = 0.0f;
-    }
-}
-
-void populate3DKernel(void)
-{
-    for(int depth = 0; depth < 3; depth++)
-    {
-        for(int row = 0; row < kernelSize; row++)
-        {
-            for(int col = 0; col < kernelSize; col++)
-            {
-                kernelBuffer[(depth * kernelSize * kernelSize) + kernelSize * row + col].real = (float) depth+1;
-                kernelBuffer[(depth * kernelSize * kernelSize) + kernelSize * row + col].imaginary = 1.0f;
-            }
-        }
     }
 }
 
