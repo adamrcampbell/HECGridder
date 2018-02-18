@@ -43,14 +43,12 @@
         </cTool>
         <linkerTool>
           <linkerLibItems>
-            <linkerOptionItem>-lgsl</linkerOptionItem>
-            <linkerOptionItem>-lgslcblas</linkerOptionItem>
+            <linkerOptionItem>-lm</linkerOptionItem>
             <linkerOptionItem>-lGL</linkerOptionItem>
             <linkerOptionItem>-lGLEW</linkerOptionItem>
             <linkerOptionItem>-lGLU</linkerOptionItem>
             <linkerOptionItem>-lX11</linkerOptionItem>
             <linkerOptionItem>-lglut</linkerOptionItem>
-            <linkerOptionItem>-lm</linkerOptionItem>
           </linkerLibItems>
         </linkerTool>
       </compileType>
