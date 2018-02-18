@@ -9,6 +9,7 @@ typedef struct Config {
     // General
     float gridDimension;
     unsigned int kernelTexSize;
+    unsigned int KernelResolutionSize;
     unsigned int kernelMaxFullSupport;
     unsigned int kernelMinFullSupport;
     unsigned int visibilityCount;
@@ -20,29 +21,26 @@ typedef struct Config {
     unsigned int refreshDelay;
     unsigned int displayDumpTime;
     
-    // Prolate Spheroidal
-    double prolateC;
-    double prolateAlpha;
-    unsigned int prolateNumTerms;
-    // Consider what to do with Spheroidal struct
-    // as not required with new method of spheroidal
-    // calculation (no GSL lib required)
-    
     // W Projection
-    float cellSize;
+    float cellSizeRad;
     float uvScale;
     float wScale;
     float fieldOfView;
     float wProjectionStep;
-    float wProjectionMaxPlane;
     float wProjectionMaxW;
     unsigned int wProjectNumPlanes;
+    double wToMaxSupportRatio;
 } Config;
 
 typedef struct FloatComplex {
     float real;
     float imaginary;
 } FloatComplex;
+
+typedef struct DoubleComplex {
+    double real;
+    double imaginary;
+} DoubleComplex;
 
 typedef struct Visibility {
     FloatComplex comp;
@@ -51,13 +49,11 @@ typedef struct Visibility {
     float w;
 } Visibility;
 
-typedef struct SpheroidalFunction {
-    gsl_vector *itsCoeffs;
-    bool itsREven;
-    double itsAlpha;
-    double itsSum0;
-} SpheroidalFunction;
-
+typedef struct InterpolationPoint {
+    float xShift;
+    float yShift;
+    DoubleComplex weight;
+} InterpolationPoint;
 
 /*--------------------------------------------------------------------
 *   FUNCTION DEFINITIONS
@@ -65,36 +61,41 @@ typedef struct SpheroidalFunction {
 void initConfig(void);
 void initGridder(void);
 void runGridder(void);
-void createKernel(int depth);
 void checkShaderStatus(GLuint shader);
 void checkProgramStatus(GLuint program);
+void setShaderUniforms(void);
 GLuint createShader(GLenum shaderType, const char* shaderSource);
 GLuint createProgram(GLuint fragmentShader, GLuint vertexShader);
 void timerEvent(int value);
 float timedifference_msec(struct timeval t0, struct timeval t1);
 void printTimesAverage(struct timeval realStart, int processStart, char description[]);
-void initSpheroidal(void);
-double calculateSpheroidalPoint(const double nu);
-double sumLegendreSeries(const double x, const int m);
-void fillHelperMatrix(gsl_matrix *B, const int m);
-double fillLegendreCoeffs(const gsl_matrix *B);
 void saveGridToFile(void);
 void loadVisibilitySamples(void);
 void compareToIdealGrid(void);
 void calculateSpheroidalCurve(float * nu, int kernelWidth);
-void createWPlanes(void);
-void createWTermLike(int width, FloatComplex wScreen[][width], float w);
-void wBeam(int width, FloatComplex wScreen[][width], float w, float centerX, float centerY, float fieldOfView);
-void calcSpheroidalCurve(float * curve);
-void fft2dVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
-void fft2dShift(int numChannels, FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
-void fft2dInverseShift(int numChannels, FloatComplex input[][numChannels], FloatComplex output[][numChannels]);
+void createWProjectionPlanes(int convolutionSize, int numWPlanes, int textureSupport, double wScale, double fov);
+void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, double w, double fieldOfView, int scalarSupport);
+void calcSpheroidalCurve(double *nu, double *curve, int width);
+void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, DoubleComplex *output);
 void calcBitReversedIndices(int n, int* indices);
+void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted);
 void printGrid(void);
 
-FloatComplex complexAdd(FloatComplex x, FloatComplex y);
-FloatComplex complexSubtract(FloatComplex x, FloatComplex y);
-FloatComplex complexMultiply(FloatComplex x, FloatComplex y);
-FloatComplex complexExponential(float ph);
+DoubleComplex normalizeWeight(DoubleComplex weight, double mag, int resolution, int support);
+float calcInterpolateShift(int index, int width, float start);
+double getShift(double width);
+void getBicubicNeighbours(int x, int y, InterpolationPoint *neighbours, int kernelFullSupport, int interpFullSupport, DoubleComplex* matrix);
+InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, InterpolationPoint newPoint, int start, int width, bool horizontal);
+void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf);
+void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data);
+float calcSpheroidalShift(int index, int width);
+int calcPosition(float x, int scalerWidth);
+float calcShift(int index, int width, float start);
+
+DoubleComplex complexAdd(DoubleComplex x, DoubleComplex y);
+DoubleComplex complexSubtract(DoubleComplex x, DoubleComplex y);
+DoubleComplex complexMultiply(DoubleComplex x, DoubleComplex y);
+DoubleComplex complexConjugateExp(double ph);
+double complexMagnitude(DoubleComplex x);
 
 #endif /* GRIDDER_H */

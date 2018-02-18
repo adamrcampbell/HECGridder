@@ -6,9 +6,6 @@
  * Created on 1 August 2017, 11:23 AM
  */
 
-//31 million visibilities = 620mb
-//3k squared grid         = 32mb
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -19,45 +16,19 @@
 
 #include <stdbool.h>
 #include <GL/glew.h>
-#include <GL/freeglut.h> 
-#include <gsl/gsl_matrix.h>
-#include <gsl/gsl_vector.h>
-#include <gsl/gsl_linalg.h>
-#include <gsl/gsl_eigen.h>
-#include <gsl/gsl_sf.h>     
+#include <GL/freeglut.h>    
 
 #include "gridder.h"
 #include "gpu.h"
 
-
-/*
- TODO LIST for this week!!
- * - Make some random depths, ie w depth matches the test data
- * - W projection properly,
- * - kernel size properly, work out how W affects kernel size
- * - get it so that its the HEC gridder converting UVW to grid cords
- * - config list... Easy to config the gridder for others
- * - refactor and tidy up code base!!
- */
-
-/* ASK THE ENZ LIST!
- 
- * HOW CAN WE CENTER THIS ON A CENTER PIXEL
- * 
- * SHOULD THE GRID BE LINEAR OR NEAREST?? KERNEL OBV LINEAR BUT THE GRID TEX??
- 
- */
+#ifndef M_PI
+    #define M_PI 3.14159265358979323846264338327
+#endif
 
 /*--------------------------------------------------------------------
  *   GUI CONFIG
  *-------------------------------------------------------------------*/
 static GLfloat guiRenderBounds[8];
-
-
-/*--------------------------------------------------------------------
- *   PROLATE SPHEROIDAL CONFIG
- *-------------------------------------------------------------------*/
-static struct SpheroidalFunction spheroidal;
 
 static GLuint sProgram;
 static GLuint sLocPosition;
@@ -97,16 +68,17 @@ int timeCallsProcess;
 bool toggle = 0;  
 int windowDisplay;
 
-// W projection and gridding configuration
+// Global gridder configuration
 Config config;
 
-
-void initConfig(void) {
+void initConfig(void) 
+{
     // Global
     windowDisplay = 900;
-    config.kernelTexSize = 128;
+    config.kernelTexSize = 128;                             // kernelTexSize >= kernelMaxFullSupport
+    config.KernelResolutionSize = 512;                      // Always a power of 2 greater than the textureSize MINIMUM
     config.gridDimension = 18000.0f;
-    config.kernelMaxFullSupport = (44.0f * 2.0f) + 1.0f;
+    config.kernelMaxFullSupport = (44.0f * 2.0f) + 1.0f;    // kernelMaxFullSupport <= kernelResolutionSize
     config.kernelMinFullSupport = (4.0f * 2.0f) + 1.0f;
     config.visibilityCount = 1;
     // config.visibilityCount = 1;//31395840;
@@ -124,29 +96,19 @@ void initConfig(void) {
     };
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
     
-    // Prolate
-    config.prolateC = 3 * M_PI;
-    config.prolateAlpha = 1;
-    config.prolateNumTerms = 16; // default: 16
-    
     // W-Projection
     config.wProjectionMaxW = 7000.0f;
-    config.wProjectionMaxPlane = 339.0f; //714
-    config.wScale = (config.wProjectionMaxPlane * config.wProjectionMaxPlane) / config.wProjectionMaxW;
+    config.wProjectNumPlanes = (int) (config.wProjectionMaxW * fabs(sin(config.cellSizeRad * (double) config.gridDimension / 2.0)));
+    config.wScale = (config.wProjectNumPlanes * config.wProjectNumPlanes) / config.wProjectionMaxW;
     config.wProjectionStep = config.wProjectionMaxW / config.wScale;
-//    config.wProjectNumPlanes = (unsigned int) ceilf((fabsf(config.wProjectionMaxW)*2+config.wProjectionStep)/config.wProjectionStep);
-    config.cellSize = 0.000006;
-    config.fieldOfView = config.cellSize * config.gridDimension; 
+    config.cellSizeRad = 0.000006;
+    config.fieldOfView = config.cellSizeRad * config.gridDimension; 
+    config.uvScale = config.fieldOfView * 1.0; // second factor for scaling
+    config.wToMaxSupportRatio = (config.kernelMaxFullSupport - config.kernelMinFullSupport) / config.wProjectionMaxW;
 }
 
-void initGridder(void) {
-    
-    kernelBuffer = malloc(sizeof (FloatComplex) * config.kernelTexSize * config.kernelTexSize * (config.wProjectionMaxPlane+1.0f));
-//    createWPlanes();
-//    exit(0);
-    
-    initSpheroidal();
-    
+void initGridder(void) 
+{    
     glClampColorARB(GL_CLAMP_VERTEX_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_READ_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
@@ -155,7 +117,8 @@ void initGridder(void) {
     int size = 4 * config.gridDimension*config.gridDimension;
     gridBuffer = (GLfloat*) malloc(sizeof (GLfloat) * size);
 
-    for (int i = 0; i < size; i += 4) {
+    for (int i = 0; i < size; i += 4) 
+    {
         gridBuffer[i] = 0.0f;
         gridBuffer[i + 1] = 0.0f;
         gridBuffer[i + 2] = 0.0f;
@@ -255,8 +218,8 @@ void initGridder(void) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     
-    for(int i = 0; i < config.wProjectionMaxPlane; i++)
-        createKernel(i);
+    kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * (config.wProjectNumPlanes), sizeof(FloatComplex));
+    // createWProjectionPlanes(kernelBuffer, config.kernelTexSize, config.KernelResolutionSize);
     
     //kernal TEXTURE
     kernalTextureID = idArray[1];
@@ -268,13 +231,12 @@ void initGridder(void) {
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_3D);
     // width, height, depth
-    glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize, config.kernelTexSize, (int) config.wProjectionMaxPlane, 0, GL_RG, GL_FLOAT, kernelBuffer);
+    glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize, config.kernelTexSize, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
     glBindTexture(GL_TEXTURE_3D, 0);
     
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
     glEnable(GL_POINT_SPRITE);
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
-    
     
     setShaderUniforms();
     
@@ -285,7 +247,7 @@ void initGridder(void) {
 }
 
 
-void setShaderUniforms()
+void setShaderUniforms(void)
 {
     printf("SETTING THE SHADER UNIFORMS\n");
     glUseProgram(sProgram);
@@ -293,7 +255,7 @@ void setShaderUniforms()
     glUniform1f(uWToMaxSupportRatio, (config.kernelMaxFullSupport-config.kernelMinFullSupport)/config.wProjectionMaxW); //(maxSuppor-minSupport) / maxW
     glUniform1f(uGridSize, config.gridDimension);
     glUniform1f(uWScale, config.wScale);
-    glUniform1f(uUVScale, config.fieldOfView * 3.5);
+    glUniform1f(uUVScale, config.uvScale);
     glUseProgram(0);
     
     glUseProgram(sProgramRender);
@@ -445,34 +407,8 @@ void printGrid(void)
     printf("\nTransfered back completed!!!!!!!!\n");
 }
 
-void createKernel(int depth)
-{   
-    float start = -1.0 + (1.0/(float)config.kernelTexSize);
-    float step = 2.0f/(float)config.kernelTexSize;
-    
-    float * curve = malloc(sizeof(float) * config.kernelTexSize);
-
-    for(int i = 0; i < config.kernelTexSize; i++)
-        curve[i] = start+(i*step);
-
-    calculateSpheroidalCurve(curve, config.kernelTexSize);
-
-    for(int row = 0; row < config.kernelTexSize; row++)
-    {   
-        for(int col = 0; col < config.kernelTexSize; col++)
-        {
-            kernelBuffer[(depth * config.kernelTexSize * config.kernelTexSize) + config.kernelTexSize * row + col].real = curve[row] * curve[col];
-            kernelBuffer[(depth * config.kernelTexSize * config.kernelTexSize) + config.kernelTexSize * row + col].imaginary = (float) depth;
-            //printf("%f ", kernelBuffer[(depth * config.kernelFullSupport * config.kernelFullSupport) + config.kernelFullSupport * row + col].real);
-        }
-        // printf("\n");
-    }
-    // printf("\n");
-    free(curve);
-}
-
 int main(int argc, char** argv) {
-
+    
     initConfig();
     
     srand((unsigned int) time(NULL));
@@ -550,127 +486,6 @@ void calculateSpheroidalCurve(float * nu, int kernelWidth)
         nu[i] = (bottom[i] > 0.0f) ? top[i]/bottom[i] : 0.0f;
         if(absNu > 1.0f)
             nu[i] = 0.0f;
-    }
-}
-
-double sumLegendreSeries(const double x, const int m)
-{
-    const int nOrders = ((int)spheroidal.itsCoeffs->size)*2 + (spheroidal.itsREven ? 0 : 1);
-    double *vals = (double*) malloc(sizeof(double) * (nOrders+1));
-    
-    const int status = gsl_sf_legendre_sphPlm_array(nOrders+m, m, x, vals);
-    double result = 0;
-    
-    for(unsigned int elem = 0; elem<spheroidal.itsCoeffs->size; ++elem)
-    {
-        const int r = 2*elem + (spheroidal.itsREven ? 0 : 1);
-        result += gsl_vector_get(spheroidal.itsCoeffs, elem) * vals[r];
-    }
-    
-    free(vals);
-    
-    if(status != GSL_SUCCESS)
-    {
-        printf("ERROR: Error calculating associated Legendre functions, status = %d", status);
-    }
-    
-    return result;
-}
-
-void fillHelperMatrix(gsl_matrix *B, const int m)
-{
-
-    const double cSquared = config.prolateC*config.prolateC;
-    
-    for(unsigned int row = 0; row < B->size1; ++row) {
-        const int r = ((int) row) * 2 + (spheroidal.itsREven ? 0 : 1);
-        const int l = r + m; // order of Legendre function P_l^m
-        double result = 0;
-        
-        result = ((double) l*(l+1)) + cSquared*(((double) 2*l+3)*(l+m)*(l-m)+((double) 2*l-1)*(l+m+1)*(l-m+1)) /
-            (((double) 2*l+1)*(2*l-1)*(2*l+3));
-        gsl_matrix_set(B, row, row, result);
-        
-        if (row>=1) 
-        {
-            result = cSquared/((double) 2*l-1)*sqrt(((double) l+m)*(l+m-1)*(l-m)*(l-m-1)/(((double) 2*l+1)*(2*l-3)));
-            gsl_matrix_set(B, row, row-1, result);
-        }
-        if (row+1<B->size1) 
-        {
-            result = cSquared/((double) 2*l+3)*sqrt(((double) l+m+1)*(l+m+2)*(l-m+1)*(l-m+2)/
-                             (((double) 2*l+1)*(2*l+5)));
-            gsl_matrix_set(B, row, row+1, result);
-        }
-    }
-}
-
-double fillLegendreCoeffs(const gsl_matrix *B)
-{
-    gsl_vector *newCoeffs = gsl_vector_alloc(B->size1);
-    gsl_vector_free(spheroidal.itsCoeffs);
-    spheroidal.itsCoeffs = newCoeffs;
-    
-    gsl_matrix *A = gsl_matrix_alloc(B->size1, B->size1);
-    gsl_matrix *eVec = gsl_matrix_alloc(B->size1, B->size1);
-    gsl_eigen_symmv_workspace *work = gsl_eigen_symmv_alloc(B->size1);
-    gsl_vector *eVal = gsl_vector_alloc(spheroidal.itsCoeffs->size);
-    
-    for(unsigned int row = 0; row < B->size1; ++row)
-        for(unsigned int col = 0; col < B->size2; ++col)
-            gsl_matrix_set(A, row, col, gsl_matrix_get(B, row, col));
-    
-    const int status = gsl_eigen_symmv(A, eVal, eVec, work);
-    double result = -1;
-    unsigned int optIndex = 0;
-    
-    if(status == GSL_SUCCESS)
-    {
-        for(unsigned int elem = 0; elem < spheroidal.itsCoeffs->size; ++elem)
-        {
-            const double val = gsl_vector_get(eVal, elem);
-            if((elem == 0) || (val < result))
-            {
-                result = val;
-                optIndex = elem;
-            }
-        }
-    }
-    
-    for(size_t i = 0; i < B->size1; ++i)
-        gsl_vector_set(spheroidal.itsCoeffs, i, gsl_matrix_get(eVec, i, optIndex));
-    
-    gsl_matrix_free(A);
-    gsl_matrix_free(eVec);
-    gsl_eigen_symmv_free(work);
-    gsl_vector_free(eVal);
-    
-    return result;
-}
-
-void initSpheroidal(void)
-{
-    spheroidal.itsAlpha = config.prolateAlpha;
-    spheroidal.itsREven = true;
-    spheroidal.itsCoeffs = gsl_vector_alloc(config.prolateNumTerms);
-    
-    gsl_matrix *hlp = gsl_matrix_alloc(config.prolateNumTerms, config.prolateNumTerms);
-    
-    fillHelperMatrix(hlp, (int) config.prolateAlpha);
-    
-    fillLegendreCoeffs(hlp);
-    
-    spheroidal.itsSum0 = sumLegendreSeries(0, (int) config.prolateAlpha);
-}
-
-double calculateSpheroidalPoint(const double nu)
-{    
-    if(nu <= -1.0 || nu >= 1.0)
-        return 0;
-    else
-    {
-        const double res = sumLegendreSeries(nu, (int) spheroidal.itsAlpha) / spheroidal.itsSum0;
-        return res * pow(1.0-nu*nu, -spheroidal.itsAlpha/2.0);
     }
 }
 
@@ -768,145 +583,261 @@ GLuint createProgram(GLuint fragmentShader, GLuint vertexShader) {
     return program;
 }
 
-void createWPlanes(void)
-{       
-    float maxW = 500.0f;
-    float wStep = 100.0f;
-    int numPlanes = 6;//(int) config.wProjectionMaxPlane + 1.0f;
-    
-    float start = -1.0 + (1.0/(float)config.kernelTexSize);
-    float step = 2.0f/(float)config.kernelTexSize;
-    
-    float * curve = malloc(sizeof(float) * config.kernelTexSize);
-    // Calculate steps
-    for(int i = 0; i < config.kernelTexSize; i++)
-        curve[i] = start+(i*step);
-    // Calculate curve from steps
-    calcSpheroidalCurve(curve);
-    FloatComplex spheroidal2d[config.kernelTexSize][config.kernelTexSize];
-    // Populate 2d complex spheroidal
-    for(int r = 0; r < config.kernelTexSize; r++)
-    {
-        for(int c = 0; c < config.kernelTexSize; c++)
-        {
-            spheroidal2d[r][c].real = curve[r] * curve[c];
-            spheroidal2d[r][c].imaginary = curve[r] * curve[c];
-            //printf("%.3f ", spheroidal2d[r][c].real);
-        }   
-        //printf("\n");
-    }
-    
-    free(curve);
-    
-    printf("createWPlanes: Max w: %.1f, step is %.1f wavelengths\n", maxW, wStep);
-    
-    float wList[numPlanes];
-    float wIncrement = 0.0f;
-    for(int i = 0; i < numPlanes; i++, wIncrement += wStep)
-        wList[i] = wIncrement;
-    
-    // Dissolve 3d array into 2d array (kernelFullSupport x wProjectNumPlanes)
-    FloatComplex wKernelList[numPlanes][(int)config.kernelTexSize][(int)config.kernelTexSize];
-    
-    for(int i = 0; i < numPlanes; i++)
-    {
-        // Create w screen
-        FloatComplex wScreen[config.kernelTexSize][config.kernelTexSize];
-        FloatComplex inverseShiftOutput[config.kernelTexSize][config.kernelTexSize];
-        FloatComplex fftResult[config.kernelTexSize][config.kernelTexSize];
-        FloatComplex shiftOutput[config.kernelTexSize][config.kernelTexSize];
-        for(int r = 0; r < config.kernelTexSize; r++)
-            for(int c = 0; c < config.kernelTexSize; c++)
-            {
-                wScreen[r][c].real = 0.0f;
-                wScreen[r][c].imaginary = 0.0f;
-                inverseShiftOutput[r][c].real = 0.0f;
-                inverseShiftOutput[r][c].imaginary = 0.0f;
-                fftResult[r][c].real = 0.0f;
-                fftResult[r][c].imaginary = 0.0f;
-                shiftOutput[r][c].real = 0.0f;
-                shiftOutput[r][c].imaginary = 0.0f;
-            }
-        
-        createWTermLike(config.gridDimension, wScreen, wList[i]);
-        
-        for(int r = 0; r < config.kernelTexSize; r++)
-            for(int c = 0; c < config.kernelTexSize; c++)
-            {
-                // Complex multiplication
-                wScreen[r][c] = complexMultiply(wScreen[r][c], spheroidal2d[r][c]);
-            }
-        
-        // Inverse shift FFT for transformation
-        fft2dInverseShift(config.kernelTexSize, wScreen, inverseShiftOutput);
-        
-        // FFT image
-        fft2dVectorRadixTransform(config.kernelTexSize, inverseShiftOutput, fftResult);
-        
-        // Inverse shift FFT'd result
-        fft2dShift(config.kernelTexSize, fftResult, shiftOutput);
-        
-        // Append to list of kernels
-        for(int r = 0; r < config.kernelTexSize; r++)
-        {
-            for(int c = 0; c < config.kernelTexSize; c++)
-            {
-                wKernelList[i][r][c] = shiftOutput[r][c];
-                printf("%20.3f ", shiftOutput[r][c].imaginary);
-            }
-             printf("\n");   
-        }
-        printf("\n\n");
-    }
-    
-    // Copy to kernel buffer global
-    
-}
-
-void createWTermLike(int width, FloatComplex wScreen[][width], float w)
-{    
-    float fieldOfView = 0.001f * config.gridDimension;
-    
-    float fresnel = fabsf(w) * ((0.5 * fieldOfView)*(0.5 * fieldOfView));
-    printf("CreateWTermLike: For w = %f, field of view = %f, fresnel number = %f\n", w, fieldOfView, fresnel);
-    wBeam(width, wScreen, w, width/2, width/2, fieldOfView);
-}
-
-void wBeam(int width, FloatComplex wScreen[][width], float w, float centerX, float centerY, float fieldOfView)
+DoubleComplex complexAdd(DoubleComplex x, DoubleComplex y)
 {
-    float r2[width][width];
-    float ph[width][width];
-    
-    for(int r = 0; r < width; r++)
-        for(int c = 0; c < width; c++)
-        {
-            float l = ((r-centerY) / width)*fieldOfView;
-            float m = ((c-centerX) / width)*fieldOfView;
-            r2[r][c] = (l*l)+(m*m);
-            
-            if(r2[r][c] < 1.0f)
-                ph[r][c] = w * (1.0 - sqrtf(1.0 - r2[r][c]));
-            else
-                ph[r][c] = 0.0f;
-        }
+    DoubleComplex z;
+    z.real = x.real + y.real;
+    z.imaginary = x.imaginary + y.imaginary;
+    return z;
+}
 
-    for(int r = 0; r < width; r++)
+DoubleComplex complexSubtract(DoubleComplex x, DoubleComplex y)
+{
+    DoubleComplex z;
+    z.real = x.real - y.real;
+    z.imaginary = x.imaginary - y.imaginary;
+    return z;
+}
+
+DoubleComplex complexMultiply(DoubleComplex x, DoubleComplex y)
+{
+    DoubleComplex z;
+    z.real = x.real*y.real - x.imaginary*y.imaginary;
+    z.imaginary = x.imaginary*y.real + x.real*y.imaginary;
+    return z;
+}
+
+DoubleComplex complexConjugateExp(double ph)
+{
+    return (DoubleComplex) {.real = cos((double)(2.0*M_PI*ph)), .imaginary = -sin((double)(2.0*M_PI*ph))};
+}
+
+double complexMagnitude(DoubleComplex x)
+{
+    return sqrt(x.real * x.real + x.imaginary * x.imaginary);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+int calcWFullSupport(double w, double wToMaxSupportRatio, double minSupport)
+{
+    // Calculates the full support width of a kernel for w term
+    return (int) (fabs(wToMaxSupportRatio * w) + minSupport);
+}
+
+void normalizeKernel(DoubleComplex *kernel, int resolution, int support)
+{
+    // Get sum of magnitudes
+    double magnitudeSum;
+    int r, c;
+    for(r = 0; r < resolution; r++)
+        for(c = 0; c < resolution; c++)
+            magnitudeSum += complexMagnitude(kernel[r * resolution + c]);
+    
+    // Normalize weights
+    for(r = 0; r < resolution; r++)
+        for(c = 0; c < resolution; c++)
+            kernel[r * resolution + c] = normalizeWeight(kernel[r * resolution + c], magnitudeSum, resolution, support);
+}
+
+DoubleComplex normalizeWeight(DoubleComplex weight, double mag, int resolution, int support)
+{
+    DoubleComplex normalized;
+    double t2 = (resolution*resolution)/(support*support);
+    normalized.real = (weight.real / mag) * t2;
+    normalized.imaginary = (weight.imaginary / mag) * t2;
+    return normalized;
+}
+
+void interpolateKernel(DoubleComplex *source, DoubleComplex* dest, int origSupport, int texSupport)
+{   
+    // Perform bicubic interpolation
+    InterpolationPoint neighbours[16];
+    InterpolationPoint interpolated[4];
+    float xShift, yShift;
+    
+    for(int y = 0; y < texSupport; y++)
     {
-        for(int c = 0; c < width; c++)
+        yShift = calcInterpolateShift(y, texSupport, -0.5)+(getShift(texSupport)/(4.0));
+        
+        for(int x = 0; x < texSupport; x++)
         {
-            if(r2[r][c] < 1.0f)
+            xShift = calcInterpolateShift(x, texSupport, -0.5)+(getShift(texSupport)/(4.0));
+            getBicubicNeighbours(x, y, neighbours, origSupport, texSupport, source);
+            
+            for(int i  = 0; i < 4; i++)
             {
-                wScreen[r][c] = complexExponential(ph[r][c]);   
+                InterpolationPoint newPoint = (InterpolationPoint) {.xShift = xShift, .yShift = neighbours[i*4].yShift};
+                newPoint = interpolateCubicWeight(neighbours, newPoint, i*4, origSupport, true);
+                interpolated[i] = newPoint;
+                
+                // printf("[%f, %f] ", newPoint.yShift, newPoint.xShift);
+//                printf("%f %f %f %f %f\n", neighbours[0].xShift, neighbours[1].xShift, newPoint.xShift, neighbours[2].xShift, neighbours[3].xShift);
+//                printf("%f %f %f %f %f\n", neighbours[0].yShift, neighbours[1].yShift, newPoint.yShift, neighbours[2].yShift, neighbours[3].yShift);
             }
-            else if(r2[r][c] == 0.0f)
-                wScreen[r][c] = (FloatComplex) {.real = 1.0f, .imaginary = 0.0f};
-            else
-                wScreen[r][c] = (FloatComplex) {.real = 0.0f, .imaginary = 0.0f};
-        }        
+            // printf("\n");
+
+            // printf("[X: %f, Y: %f] ", xShift, yShift);
+            
+            InterpolationPoint final = (InterpolationPoint) {.xShift = xShift, .yShift = yShift};
+            final = interpolateCubicWeight(interpolated, final, 0, origSupport, false);
+            int index = y * texSupport + x;
+            dest[index] = (DoubleComplex) {.real = final.weight.real, .imaginary = final.weight.imaginary};
+        }
+        // printf("\n");
     }
 }
 
-void fft2dVectorRadixTransform(int numChannels, const FloatComplex input[][numChannels], FloatComplex output[][numChannels])
+void createWProjectionPlanes(int convolutionSize, int numWPlanes, int textureSupport, double wScale, double fov)
+{                
+    int convHalf = convolutionSize/2;
+    // Flat two dimension array
+    DoubleComplex *screen = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
+    // Flat cube array (numWPlanes * texFullSupport^2)
+    FloatComplex *wTextures = calloc(numWPlanes * textureSupport * textureSupport, sizeof(FloatComplex));
+    // Create w screen
+    DoubleComplex *shift = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
+    // Single dimension spheroidal
+    double *spheroidal = calloc(convolutionSize, sizeof(double));
+    
+    // numWPlanes = 2;//numWPlanes-1;
+    //int plane = numWPlanes-1;
+    int plane = numWPlanes-1;
+    for(int iw = numWPlanes-1; iw < numWPlanes; iw++)
+    {        
+        // Calculate w term and w specific support size
+        double w = iw * iw / wScale;
+        int wFullSupport = calcWFullSupport(w, config.wToMaxSupportRatio, config.kernelMinFullSupport);
+        // Calculate Prolate Spheroidal
+        createScaledSpheroidal(spheroidal, wFullSupport, convHalf);
+        
+//        // Prints prolate spheroidal
+//        for(int i = 0; i < convolutionSize; i++)
+//        {
+//            for(int j = 0; j < convolutionSize; j++)
+//            {
+//                printf("%f ", spheroidal[i] * spheroidal[j]);
+//            }
+//            printf("\n");
+//        }
+//        
+//        for(int i = 0; i < convolutionSize; i++)
+//            printf("%f\n", spheroidal[i]);
+        
+        // Create Phase Screen
+        createPhaseScreen(convolutionSize, screen, spheroidal, w, fov, wFullSupport);
+        
+        if(iw == plane)
+            saveKernelToFile("wproj_%f_phase_screen_%d.csv", w, convolutionSize, screen);
+        
+        // Perform shift and inverse FFT of Phase Screen
+        fft2dShift(convolutionSize, screen, shift);
+        inverseFFT2dVectorRadixTransform(convolutionSize, shift, screen);
+        fft2dShift(convolutionSize, screen, shift);
+        
+        if(iw == plane)
+            saveKernelToFile("wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
+       
+        // Normalize the kernel
+        normalizeKernel(shift, convolutionSize, wFullSupport);
+        
+        if(iw == plane)
+            saveKernelToFile("wproj_%f_normalized_%d.csv", w, convolutionSize, shift);
+        
+        DoubleComplex *interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
+        interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
+        
+        if(iw == plane)
+            saveKernelToFile("wproj_%f_interpolated_%d.csv", w, textureSupport, interpolated);
+        
+        // Bind interpolated kernel to texture matrix
+        
+        free(interpolated);
+        memset(screen, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
+        memset(shift, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
+    }
+    
+    free(spheroidal);
+    free(screen);
+    free(shift);
+}
+
+void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf)
+{
+    int wHalfSupport = wFullSupport/2;
+    double *nu = calloc(wFullSupport, sizeof(double));
+    double *tempSpheroidal = calloc(wFullSupport, sizeof(double));
+    // Calculate steps
+    for(int i = 0; i < wFullSupport; i++)
+    {
+        nu[i] = fabs(calcSpheroidalShift(i, wFullSupport));
+//        printf("%f\n", nu[i]);
+    }
+//    printf("\n\n");
+        
+    // Calculate curve from steps
+    calcSpheroidalCurve(nu, tempSpheroidal, wFullSupport);
+    
+    // Bind weights to middle
+    for(int i = convHalf-wHalfSupport; i <= convHalf+wHalfSupport; i++)
+        spheroidal[i] = tempSpheroidal[i-(convHalf-wHalfSupport)];    
+    
+    free(tempSpheroidal);
+    free(nu);
+}
+
+void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, double w, double fieldOfView, int scalarSupport)
+{        
+    int convHalf = convSize/2;
+    int scalarHalf = scalarSupport/2;
+    int index = 0;
+    double taper, taperY;
+    double l, m;
+    double lsq, rsq;
+    double phase;
+    
+    for(int iy = 0; iy < scalarSupport; iy++)
+    {
+        l = (((double) iy-(scalarHalf)) / (double) scalarSupport) * fieldOfView;
+        lsq = l*l;
+        taperY = spheroidal[iy+(convHalf-scalarHalf)];
+        phase = 0.0;
+        
+        for(int ix = 0; ix < scalarSupport; ix++)
+        {
+            m = (((double) ix-(scalarHalf)) / (double) scalarSupport) * fieldOfView;
+            rsq = lsq+(m*m);
+            taper = taperY * spheroidal[ix+(convHalf-scalarHalf)];
+            index = (iy+(convHalf-scalarHalf)) * convSize + (ix+(convHalf-scalarHalf));
+            
+            if(rsq < 1.0)
+            {
+                phase = w * (1.0 - sqrt(1.0 - rsq));
+                screen[index] = complexConjugateExp(phase);
+            }
+            
+            if(rsq == 0.0)
+                screen[index] = (DoubleComplex) {.real = 1.0, .imaginary = 0.0};
+            
+            // Note: what happens when W = 0?
+                
+            screen[index].real *= taper;
+            screen[index].imaginary *= taper;
+        }
+    }
+}
+
+void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, DoubleComplex *output)
 {   
     // Calculate bit reversed indices
     int* bitReversedIndices = malloc(sizeof(int) * numChannels);
@@ -915,41 +846,45 @@ void fft2dVectorRadixTransform(int numChannels, const FloatComplex input[][numCh
     // Copy data to result for processing
     for(int r = 0; r < numChannels; r++)
         for(int c = 0; c < numChannels; c++)
-            output[r][c] = input[bitReversedIndices[r]][bitReversedIndices[c]];
+            output[r * numChannels + c] = input[bitReversedIndices[r] * numChannels + bitReversedIndices[c]];
     free(bitReversedIndices);
     
     // Use butterfly operations on result to find the DFT of original data
     for(int m = 2; m <= numChannels; m *= 2)
     {
-        FloatComplex omegaM = (FloatComplex) {.real = cosf(M_PI * 2.0 / m), .imaginary = -sinf(M_PI * 2.0 / m)};
+        DoubleComplex omegaM = (DoubleComplex) {.real = cos(M_PI * 2.0 / m), .imaginary = sin(M_PI * 2.0 / m)};
         
         for(int k = 0; k < numChannels; k += m)
         {
             for(int l = 0; l < numChannels; l += m)
             {
-                FloatComplex x = (FloatComplex) {.real = 1.0f, .imaginary = 0.0f};
+                DoubleComplex x = (DoubleComplex) {.real = 1.0, .imaginary = 0.0};
                 
                 for(int i = 0; i < m / 2; i++)
                 {
-                    FloatComplex y = (FloatComplex) {.real = 1.0f, .imaginary = 0.0f};
+                    DoubleComplex y = (DoubleComplex) {.real = 1.0, .imaginary = 0.0};
                     
                     for(int j = 0; j < m / 2; j++)
-                    {
+                    {   
                         // Perform 2D butterfly operation in-place at (k+j, l+j)
-                        FloatComplex in00 = output[k+i][l+j];
-                        FloatComplex in01 = complexMultiply(output[k+i][l+j+m/2], y);
-                        FloatComplex in10 = complexMultiply(output[k+i+m/2][l+j], x);
-                        FloatComplex in11 = complexMultiply(complexMultiply(output[k+i+m/2][l+j+m/2], x), y);
+                        int in00Index = (k+i) * numChannels + (l+j);
+                        DoubleComplex in00 = output[in00Index];
+                        int in01Index = (k+i) * numChannels + (l+j+m/2);
+                        DoubleComplex in01 = complexMultiply(output[in01Index], y);
+                        int in10Index = (k+i+m/2) * numChannels + (l+j);
+                        DoubleComplex in10 = complexMultiply(output[in10Index], x);
+                        int in11Index = (k+i+m/2) * numChannels + (l+j+m/2);
+                        DoubleComplex in11 = complexMultiply(complexMultiply(output[in11Index], x), y);
                         
-                        FloatComplex temp00 = complexAdd(in00, in01);
-                        FloatComplex temp01 = complexSubtract(in00, in01);
-                        FloatComplex temp10 = complexAdd(in10, in11);
-                        FloatComplex temp11 = complexSubtract(in10, in11);
+                        DoubleComplex temp00 = complexAdd(in00, in01);
+                        DoubleComplex temp01 = complexSubtract(in00, in01);
+                        DoubleComplex temp10 = complexAdd(in10, in11);
+                        DoubleComplex temp11 = complexSubtract(in10, in11);
                         
-                        output[k+i][l+j] = complexAdd(temp00, temp10);
-                        output[k+i][l+j+m/2] = complexAdd(temp01, temp11);
-                        output[k+i+m/2][l+j] = complexSubtract(temp00, temp10);
-                        output[k+i+m/2][l+j+m/2] = complexSubtract(temp01, temp11);
+                        output[in00Index] = complexAdd(temp00, temp10);
+                        output[in01Index] = complexAdd(temp01, temp11);
+                        output[in10Index] = complexSubtract(temp00, temp10);
+                        output[in11Index] = complexSubtract(temp01, temp11);
                         y = complexMultiply(y, omegaM);
                     }
                     x = complexMultiply(x, omegaM);
@@ -957,6 +892,13 @@ void fft2dVectorRadixTransform(int numChannels, const FloatComplex input[][numCh
             }
         }
     }
+    
+    for(int i = 0; i < numChannels; i++)
+        for(int j = 0; j < numChannels; j++)
+        {
+            output[i * numChannels + j].real /= (numChannels * numChannels);
+            output[i * numChannels + j].imaginary /= (numChannels * numChannels);
+        }
 }
 
 void calcBitReversedIndices(int n, int* indices)
@@ -976,134 +918,195 @@ void calcBitReversedIndices(int n, int* indices)
     }
 }
 
-void fft2dShift(int numChannels, FloatComplex input[][numChannels], FloatComplex shifted[][numChannels]) 
-{
-    for(int i = 0; i < numChannels; i++)
-    {
-        for(int j = 0; j < numChannels; j++)
-        {            
-            // Top-left
-            if(i < numChannels/2 && j < numChannels/2)
-                shifted[i+numChannels/2][j+numChannels/2] = input[i][j];
-            // Bottom-left
-            else if(i >= numChannels/2 && j < numChannels/2)
-                shifted[i-numChannels/2][j+numChannels/2] = input[i][j];
-            // Top-right
-            else if(i < numChannels/2 && j >= numChannels/2)
-                shifted[i+numChannels/2][j-numChannels/2] = input[i][j];
-            // Bottom-right
-            else
-                shifted[i-numChannels/2][j-numChannels/2] = input[i][j];
-        }
-    }
-}
-
-void fft2dInverseShift(int numChannels, FloatComplex input[][numChannels], FloatComplex inverse[][numChannels]) 
-{
-    for(int i = 0; i < numChannels; i++)
-    {
-        for(int j = 0; j < numChannels; j++)
-        {            
-            // Top-left
-            if(i < numChannels/2 && j < numChannels/2)
-                inverse[i+numChannels/2][j+numChannels/2] = input[i][j];
-            // Bottom-left
-            else if(i >= numChannels/2 && j < numChannels/2)
-                inverse[i-numChannels/2][j+numChannels/2] = input[i][j];
-            // Top-right
-            else if(i < numChannels/2 && j >= numChannels/2)
-                inverse[i+numChannels/2][j-numChannels/2] = input[i][j];
-            // Bottom-right
-            else
-                inverse[i-numChannels/2][j-numChannels/2] = input[i][j];
-        }
-    }
-}
-
-FloatComplex complexAdd(FloatComplex x, FloatComplex y)
-{
-    FloatComplex z;
-    z.real = x.real + y.real;
-    z.imaginary = x.imaginary + y.imaginary;
-    return z;
-}
-
-FloatComplex complexSubtract(FloatComplex x, FloatComplex y)
-{
-    FloatComplex z;
-    z.real = x.real - y.real;
-    z.imaginary = x.imaginary - y.imaginary;
-    return z;
-}
-
-FloatComplex complexMultiply(FloatComplex x, FloatComplex y)
-{
-    FloatComplex z;
-    z.real = x.real*y.real - x.imaginary*y.imaginary;
-    z.imaginary = x.imaginary*y.real + x.real*y.imaginary;
-    return z;
-}
-
-FloatComplex complexExponential(float ph)
-{
-    return (FloatComplex) {.real = cosf(2*M_PI*ph), .imaginary = -sinf(2*M_PI*ph)};
-}
-
-// Nu should be array of points between -1 && -1
-void calcSpheroidalCurve(float * curve)
+void calcSpheroidalCurve(double *nu, double *curve, int width)
 {   
-    float p[2][5] = {{8.203343e-2, -3.644705e-1, 6.278660e-1, -5.335581e-1, 2.312756e-1},
+    double p[2][5] = {{8.203343e-2, -3.644705e-1, 6.278660e-1, -5.335581e-1, 2.312756e-1},
                      {4.028559e-3, -3.697768e-2, 1.021332e-1, -1.201436e-1, 6.412774e-2}};
-    float q[2][3] = {{1.0000000e0, 8.212018e-1, 2.078043e-1},
+    double q[2][3] = {{1.0000000e0, 8.212018e-1, 2.078043e-1},
                      {1.0000000e0, 9.599102e-1, 2.918724e-1}};
     
     int pNum = 5;
     int qNum = 3;
     
-    for(int i = 0; i < config.kernelTexSize; i++)
-        curve[i] = fabsf(curve[i]);
+    int *part = calloc(width, sizeof(int));
+    double *nuend = calloc(width, sizeof(double));
+    double *delnusq = calloc(width, sizeof(double));
+    double *top = calloc(width, sizeof(double));
+    double *bottom = calloc(width, sizeof(double));
     
-    int part[config.kernelTexSize];
-    float nuend[config.kernelTexSize];
-    for(int i = 0; i < config.kernelTexSize; i++)
+    for(int i = 0; i < width; i++)
     {
-        if(curve[i] >= 0.0f && curve[i] <= 0.75f)
+        if(nu[i] >= 0.0 && nu[i] <= 0.75)
             part[i] = 0;
-        else if(curve[i] > 0.75f && curve[i] < 1.0f)
+        if(nu[i] > 0.75 && nu[i] < 1.0)
             part[i] = 1;
         
-        if(curve[i] >= 0.0f && curve[i] <= 0.75f)
-            nuend[i] = 0.75f;
-        else if(curve[i] > 0.75f && curve[i] < 1.0f)
-            nuend[i] = 1.0f;      
+        if(nu[i] >= 0.0 && nu[i] <= 0.75)
+            nuend[i] = 0.75;
+        if(nu[i] > 0.75 && nu[i] < 1.0)
+            nuend[i] = 1.0;
+        
+        delnusq[i] = (nu[i] * nu[i]) - (nuend[i] * nuend[i]);
     }
     
-    float delnusq[config.kernelTexSize];
-    for(int i = 0; i < config.kernelTexSize; i++)
-        delnusq[i] = (curve[i] * curve[i]) - (nuend[i] * nuend[i]);
-    
-    float top[config.kernelTexSize];
-    for(int i = 0; i < config.kernelTexSize; i++)
+    for(int i = 0; i < width; i++)
+    {
         top[i] = p[part[i]][0];
+        bottom[i] = q[part[i]][0];
+    }
     
     for(int i = 1; i < pNum; i++)
-        for(int y = 0; y < config.kernelTexSize; y++)
+        for(int y = 0; y < width; y++)
             top[y] += (p[part[y]][i] * pow(delnusq[y], i)); 
     
-    float bottom[config.kernelTexSize];
-    for(int i = 0; i < config.kernelTexSize; i++)
-        bottom[i] = q[part[i]][0];
-    
     for(int i = 1; i < qNum; i++)
-        for(int y = 0; y < config.kernelTexSize; y++)
+        for(int y = 0; y < width; y++)
             bottom[y] += (q[part[y]][i] * pow(delnusq[y], i));
     
-    for(int i = 0; i < config.kernelTexSize; i++)
+    for(int i = 0; i < width; i++)
     {   
-        float absCurve = abs(curve[i]);
-        curve[i] = (bottom[i] > 0.0f) ? top[i]/bottom[i] : 0.0f;
-        if(absCurve > 1.0f)
-            curve[i] = 0.0f;
+        if(bottom[i] > 0.0)
+            curve[i] = top[i] / bottom[i];
+        if(fabs(nu[i]) > 1.0)
+            curve[i] = 0.0;
+        
     }
+    
+    free(bottom);
+    free(top);
+    free(delnusq);
+    free(nuend);
+    free(part);
+}
+
+void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted)
+{
+    int r = 0, c = 0;
+    for(int i = -n/2; i < n/2; i++)
+    {
+        for(int j = -n/2; j < n/2; j++)
+        {
+            if(i >= 0 && j >= 0)
+                shifted[r * n + c] = input[i * n +j];
+            else if(i < 0 && j >=0)
+                shifted[r * n + c] = input[(i+n)*n+j];
+            else if(i >= 0 && j < 0)
+                shifted[r * n + c] = input[i*n+j+n];
+            else
+                shifted[r * n + c] = input[(i+n)*n+j+n];
+            
+            c++;
+        }
+        r++;
+        c = 0;
+    }
+}
+
+InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, InterpolationPoint newPoint, int start, int width, bool horizontal)
+{      
+    double shiftCubed = pow(getShift(width), 3);
+
+    DoubleComplex p0 = (DoubleComplex) {.real = (horizontal) ? points[start+0].xShift : points[start+0].yShift, .imaginary = 0.0};
+    DoubleComplex p1 = (DoubleComplex) {.real = (horizontal) ? points[start+1].xShift : points[start+1].yShift, .imaginary = 0.0};
+    DoubleComplex p2 = (DoubleComplex) {.real = (horizontal) ? points[start+2].xShift : points[start+2].yShift, .imaginary = 0.0};
+    DoubleComplex p3 = (DoubleComplex) {.real = (horizontal) ? points[start+3].xShift : points[start+3].yShift, .imaginary = 0.0};
+    DoubleComplex interpShift = (DoubleComplex) {.real = (horizontal) ? newPoint.xShift : newPoint.yShift, .imaginary = 0.0};
+    
+    DoubleComplex w0 = (DoubleComplex) {.real = -(points[start+0].weight.real) / (6.0 * shiftCubed), 
+            .imaginary = -(points[start+0].weight.imaginary) / (6.0 * shiftCubed)};
+    DoubleComplex w1 = (DoubleComplex) {.real = points[start+1].weight.real / (2.0 * shiftCubed),
+            .imaginary = points[start+1].weight.imaginary / (2.0 * shiftCubed)};
+    DoubleComplex w2 = (DoubleComplex) {.real = -points[start+2].weight.real / (2.0 * shiftCubed), 
+            .imaginary = -points[start+2].weight.imaginary / (2.0 * shiftCubed)};
+    DoubleComplex w3 = (DoubleComplex) {.real = points[start+3].weight.real / (6.0 * shiftCubed), 
+            .imaginary = points[start+3].weight.imaginary / (6.0 * shiftCubed)}; 
+    
+    // Refactor for complex multiplication and subtraction
+    DoubleComplex t0 = complexMultiply(complexMultiply(complexMultiply(w0, complexSubtract(interpShift, p1)), complexSubtract(interpShift, p2)), 
+            complexSubtract(interpShift, p3));
+    DoubleComplex t1 = complexMultiply(complexMultiply(complexMultiply(w1, complexSubtract(interpShift, p0)), complexSubtract(interpShift, p2)), 
+            complexSubtract(interpShift, p3));
+    DoubleComplex t2 = complexMultiply(complexMultiply(complexMultiply(w2, complexSubtract(interpShift, p0)), complexSubtract(interpShift, p1)),
+            complexSubtract(interpShift, p3));
+    DoubleComplex t3 = complexMultiply(complexMultiply(complexMultiply(w3, complexSubtract(interpShift, p0)), complexSubtract(interpShift, p1)), 
+            complexSubtract(interpShift, p2));
+    // Refactor for complex addition
+    newPoint.weight = complexAdd(complexAdd(complexAdd(t0, t1), t2), t3);
+    return newPoint;
+}
+
+void getBicubicNeighbours(int x, int y, InterpolationPoint *neighbours, int origFullSupport, int interpFullSupport, DoubleComplex* matrix)
+{
+    // Transform x, y into scaled shift
+    float shiftX = calcInterpolateShift(x+1, interpFullSupport, -0.5);
+    float shiftY = calcInterpolateShift(y+1, interpFullSupport, -0.5);
+//    printf("Populating element at Row: %d and Col: %d\n", y, x);
+//    printf("Row Shift: %f, Col Shift: %f\n", shiftY, shiftX);
+    // Get x, y from scaled shift 
+    int scaledPosX = calcPosition(shiftX, origFullSupport)-1;
+    int scaledPosY = calcPosition(shiftY, origFullSupport)-1;
+//     printf("X: %d, Y: %d\n", scaledPosX, scaledPosY);
+    // Get 16 nInterpolationPointeighbours
+    for(int r = scaledPosY - 1, i = 0; r < scaledPosY + 3; r++)
+    {
+        for(int c = scaledPosX - 1; c < scaledPosX + 3; c++)
+        {
+            InterpolationPoint n = (InterpolationPoint) {.xShift = calcShift(c, origFullSupport, -1.0), .yShift = calcShift(r, origFullSupport, -1.0)};
+            
+            if(c < 0 || c > origFullSupport || r < 0 || r > origFullSupport)
+                n.weight = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};
+            else
+                n.weight = matrix[r * origFullSupport + c];
+            
+            neighbours[i++] = n;
+        }
+    }
+}
+
+float calcSpheroidalShift(int index, int width)
+{   
+    return -1.0 + index * getShift(width-1);
+}
+
+float calcInterpolateShift(int index, int width, float start)
+{
+    return start + ((float)index/(float)width);
+}
+
+float calcShift(int index, int width, float start)
+{
+    return start + index * getShift(width);
+}
+
+double getShift(double width)
+{
+    return 2.0/width;
+}
+
+float getStartShift(float width)
+{
+    return -1.0 + (1.0 / width);
+}
+
+int calcPosition(float x, int scalerWidth)
+{
+    return (int) floor(((x+1.0f)/2.0f) * (scalerWidth));
+}
+
+void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data)
+{
+    char *buffer[100];
+    sprintf(buffer, filename, w, support);
+    FILE *file = fopen(buffer, "w");
+    for(int r = 0; r < support; r++)
+    {
+        for(int c = 0; c < support; c++)
+        {
+            fprintf(file, "%f, ", data[r * support + c].real);
+        }
+        fprintf(file, "\n");
+    }
+    fclose(file);
+    printf("FILE SAVED\n");
 }
 
