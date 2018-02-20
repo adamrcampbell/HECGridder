@@ -7,11 +7,11 @@
 *-------------------------------------------------------------------*/
 typedef struct Config {
     // General
-    float gridDimension;
+    unsigned int gridDimension;
     unsigned int kernelTexSize;
-    unsigned int KernelResolutionSize;
-    unsigned int kernelMaxFullSupport;
-    unsigned int kernelMinFullSupport;
+    unsigned int kernelResolutionSize;
+    float kernelMaxFullSupport;
+    float kernelMinFullSupport;
     unsigned int visibilityCount;
     unsigned int numVisibilityParams;
     bool visibilitiesFromFile;
@@ -73,7 +73,7 @@ void saveGridToFile(void);
 void loadVisibilitySamples(void);
 void compareToIdealGrid(void);
 void calculateSpheroidalCurve(float * nu, int kernelWidth);
-void createWProjectionPlanes(int convolutionSize, int numWPlanes, int textureSupport, double wScale, double fov);
+void createWProjectionPlanes(FloatComplex *wTextures);
 void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, double w, double fieldOfView, int scalarSupport);
 void calcSpheroidalCurve(double *nu, double *curve, int width);
 void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, DoubleComplex *output);

@@ -6,24 +6,7 @@
 /*
  * Inclusion of 0.04 to gl_PointSize is to accommodate overflow
  * of kernel texture weights when smearing a fixed sized kernel texture.
- * position contains  
  */
-/*
-  const int g_centre = grid_size / 2;
- const double scale = grid_size * cell_size_rad;
-      if(file != NULL)
-           	   {   int numOutputVis = num_vis;
-
-           		   fprintf(file,"%d\n",numOutputVis);
-				   for(int i=0,j=0;i<numOutputVis;i++,j+=2)
-				   {   float scaleUU = (uu[i]*scale)+g_centre;
-				       float scaleVV = (vv[i]*scale)+g_centre;
- 
- 
- */
-
-
-
 
 #define VERTEX_SHADER " \
   #version 430\n \
@@ -64,23 +47,6 @@
     gl_FragColor.a = kernelLookup.g; \
   }"
 
-
-//#define FRAGMENT_SHADER " \
-//  #version 430\n \
-//  precision highp float; \
-//  uniform sampler3D kernalTex;\
-//  in vec2 fComplex; \
-//  in float wPlane; \
-//  void main() { \
-//    vec2 kernelLookup = texture(kernalTex,vec3(gl_PointCoord.xy,abs(wPlane))).rg; \
-//    gl_FragColor.r = kernelLookup.r; \
-//    gl_FragColor.gb = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
-//                                 kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
-//    gl_FragColor.a = kernelLookup.g; \
-//  }"
-/*
- * 
- */
 #define FRAGMENT_SHADER_RENDER " \
   #version 430\n \
   uniform sampler2D destTex; \
