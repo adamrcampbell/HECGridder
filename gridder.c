@@ -25,6 +25,41 @@
     #define M_PI 3.14159265358979323846264338327
 #endif
 
+// NAG Dataset configurations
+//
+//  File:           el82-70.txt
+//  Min Support:    4.0
+//  Max Support:    44.0
+//  Max W:          6746.082031 //7000
+//  Max Plane:      339.0
+//  Cell Size Rad:  0.000006
+//  Grid Size       18000
+//
+//  File:           el56-82.txt
+//  Min Support:    4
+//  Max Support:    72
+//  Max W:          11937.875977   //12000
+//  Max Plane:      601
+//  Cell Size Rad:  0.000006
+//
+//  File:           el30-56
+//  Min Support:    4
+//  Max Support:    95
+//  Max W:          -18309 //19000
+//  Max Plane:      922
+//  Cell Size Rad:  0.000006
+//
+//  File:           synthetic.txt
+//  Grid Size:      100000
+//  Min Support:    4
+//  Max Support:    36
+//  Max W:          38971
+//  Max Plane:      714
+//  Cell Size Rad:  0.000004
+
+// ADAMS TO DO LIST:
+// - W projection doesnt seem to hit max W value
+
 /*--------------------------------------------------------------------
  *   GUI CONFIG
  *-------------------------------------------------------------------*/
@@ -76,35 +111,39 @@ void initConfig(void)
     // Global
     windowDisplay = 900;
     config.kernelTexSize = 128;                             // kernelTexSize >= kernelMaxFullSupport
-    config.KernelResolutionSize = 512;                      // Always a power of 2 greater than the textureSize MINIMUM
-    config.gridDimension = 18000.0f;
+    config.kernelResolutionSize = 256;                      // Always a power of 2 greater than the textureSize MINIMUM
+    config.gridDimension = 18000;
     config.kernelMaxFullSupport = (44.0f * 2.0f) + 1.0f;    // kernelMaxFullSupport <= kernelResolutionSize
     config.kernelMinFullSupport = (4.0f * 2.0f) + 1.0f;
     config.visibilityCount = 1;
     // config.visibilityCount = 1;//31395840;
     config.numVisibilityParams = 5;
     config.visibilitiesFromFile = true;
-    config.displayDumpTime = 10;
-    config.visibilitySourceFile = "el82-70.txt"; //"el82-70_vis.txt";
+    config.displayDumpTime = 50;
+    config.visibilitySourceFile = "datasets/el82-70.txt"; //"el82-70_vis.txt";
     // Gui
     config.refreshDelay = 0;
+    float gridDimFloat = (float) config.gridDimension;
     GLfloat renderTemp[8] = {
-        -config.gridDimension/2.0f, -config.gridDimension/2.0f,
-        -config.gridDimension/2.0f, config.gridDimension/2.0f,
-        config.gridDimension/2.0f, -config.gridDimension/2.0f,
-        config.gridDimension/2.0f, config.gridDimension/2.0f
+        -gridDimFloat/2.0f, -gridDimFloat/2.0f,
+        -gridDimFloat/2.0f, gridDimFloat/2.0f,
+        gridDimFloat/2.0f, -gridDimFloat/2.0f,
+        gridDimFloat/2.0f, gridDimFloat/2.0f
     };
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
     
     // W-Projection
     config.wProjectionMaxW = 7000.0f;
-    config.wProjectNumPlanes = (int) (config.wProjectionMaxW * fabs(sin(config.cellSizeRad * (double) config.gridDimension / 2.0)));
-    config.wScale = (config.wProjectNumPlanes * config.wProjectNumPlanes) / config.wProjectionMaxW;
-    config.wProjectionStep = config.wProjectionMaxW / config.wScale;
     config.cellSizeRad = 0.000006;
-    config.fieldOfView = config.cellSizeRad * config.gridDimension; 
+    config.wProjectNumPlanes = 339;//(int) (config.wProjectionMaxW * fabs(sin(config.cellSizeRad * (double) config.gridDimension / 2.0)));
+    config.wScale = pow(config.wProjectNumPlanes-1, 2.0) / config.wProjectionMaxW; // (config.wProjectNumPlanes * config.wProjectNumPlanes) / config.wProjectionMaxW;
+    config.wProjectionStep = config.wProjectionMaxW / config.wScale;
+    config.fieldOfView = config.cellSizeRad *  config.gridDimension;
     config.uvScale = config.fieldOfView * 1.0; // second factor for scaling
     config.wToMaxSupportRatio = (config.kernelMaxFullSupport - config.kernelMinFullSupport) / config.wProjectionMaxW;
+    
+    printf("W Scale: %f\n", config.wScale);
+    printf("W Max Support Ratio: %f\n", config.wToMaxSupportRatio);
 }
 
 void initGridder(void) 
@@ -218,8 +257,8 @@ void initGridder(void)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     
-    kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * (config.wProjectNumPlanes), sizeof(FloatComplex));
-    // createWProjectionPlanes(kernelBuffer, config.kernelTexSize, config.KernelResolutionSize);
+    kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * config.wProjectNumPlanes, sizeof(FloatComplex));
+    createWProjectionPlanes(kernelBuffer);
     
     //kernal TEXTURE
     kernalTextureID = idArray[1];
@@ -273,7 +312,7 @@ void runGridder(void) {
 
             visibilities[i] = 0.0f;//(float) (rand() % (int) config.gridDimension);
             visibilities[i + 1] = 0.0f;//(float) (rand() % (int) config.gridDimension);
-            visibilities[i + 2] = 1000.0f;//(float) randomKernel;
+            visibilities[i + 2] = 7000.0f;//(float) randomKernel;
             visibilities[i + 3] = 1.0f;//((float)rand()/RAND_MAX * 2.0f)-1.0f;
             visibilities[i + 4] = 1.0f;//((float)rand()/RAND_MAX * 2.0f)-1.0f;
         }
@@ -297,7 +336,6 @@ void runGridder(void) {
 
     glBindTexture(GL_TEXTURE_3D, kernalTextureID);
     glUniform1i(uShaderTextureKernalHandle, 0);
-
 
     //glBindBuffer(GL_ARRAY_BUFFER, guiRenderBoundsBuffer);
     glBindBuffer(GL_ARRAY_BUFFER, visibilityBuffer);
@@ -617,18 +655,6 @@ double complexMagnitude(DoubleComplex x)
     return sqrt(x.real * x.real + x.imaginary * x.imaginary);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
 int calcWFullSupport(double w, double wToMaxSupportRatio, double minSupport)
 {
     // Calculates the full support width of a kernel for w term
@@ -681,11 +707,11 @@ void interpolateKernel(DoubleComplex *source, DoubleComplex* dest, int origSuppo
                 newPoint = interpolateCubicWeight(neighbours, newPoint, i*4, origSupport, true);
                 interpolated[i] = newPoint;
                 
-                // printf("[%f, %f] ", newPoint.yShift, newPoint.xShift);
+//                printf("[%f, %f] ", newPoint.yShift, newPoint.xShift);
 //                printf("%f %f %f %f %f\n", neighbours[0].xShift, neighbours[1].xShift, newPoint.xShift, neighbours[2].xShift, neighbours[3].xShift);
 //                printf("%f %f %f %f %f\n", neighbours[0].yShift, neighbours[1].yShift, newPoint.yShift, neighbours[2].yShift, neighbours[3].yShift);
             }
-            // printf("\n");
+//            printf("\n");
 
             // printf("[X: %f, Y: %f] ", xShift, yShift);
             
@@ -694,29 +720,35 @@ void interpolateKernel(DoubleComplex *source, DoubleComplex* dest, int origSuppo
             int index = y * texSupport + x;
             dest[index] = (DoubleComplex) {.real = final.weight.real, .imaginary = final.weight.imaginary};
         }
-        // printf("\n");
+//        printf("\n");
     }
 }
 
-void createWProjectionPlanes(int convolutionSize, int numWPlanes, int textureSupport, double wScale, double fov)
+void createWProjectionPlanes(FloatComplex *wTextures)
 {                
+    int convolutionSize = config.kernelResolutionSize;
+    int textureSupport = config.kernelTexSize;
     int convHalf = convolutionSize/2;
+    int numWPlanes = config.wProjectNumPlanes;
+    double wScale = config.wScale;
+    double fov = config.fieldOfView;
+    
     // Flat two dimension array
     DoubleComplex *screen = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
-    // Flat cube array (numWPlanes * texFullSupport^2)
-    FloatComplex *wTextures = calloc(numWPlanes * textureSupport * textureSupport, sizeof(FloatComplex));
     // Create w screen
     DoubleComplex *shift = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
     // Single dimension spheroidal
     double *spheroidal = calloc(convolutionSize, sizeof(double));
     
     // numWPlanes = 2;//numWPlanes-1;
-    //int plane = numWPlanes-1;
     int plane = numWPlanes-1;
-    for(int iw = numWPlanes-1; iw < numWPlanes; iw++)
+    printf("Num W Planes: %d\n", numWPlanes);
+    for(int iw = 0; iw < numWPlanes; iw++)
     {        
         // Calculate w term and w specific support size
         double w = iw * iw / wScale;
+        double fresnel = w * ((0.5 * config.fieldOfView)*(0.5 * config.fieldOfView));
+        printf("CreateWTermLike: For w = %f, field of view = %f, fresnel number = %f\n", w, config.fieldOfView, fresnel);
         int wFullSupport = calcWFullSupport(w, config.wToMaxSupportRatio, config.kernelMinFullSupport);
         // Calculate Prolate Spheroidal
         createScaledSpheroidal(spheroidal, wFullSupport, convHalf);
@@ -738,7 +770,7 @@ void createWProjectionPlanes(int convolutionSize, int numWPlanes, int textureSup
         createPhaseScreen(convolutionSize, screen, spheroidal, w, fov, wFullSupport);
         
         if(iw == plane)
-            saveKernelToFile("wproj_%f_phase_screen_%d.csv", w, convolutionSize, screen);
+            saveKernelToFile("output/wproj_%f_phase_screen_%d.csv", w, convolutionSize, screen);
         
         // Perform shift and inverse FFT of Phase Screen
         fft2dShift(convolutionSize, screen, shift);
@@ -746,21 +778,31 @@ void createWProjectionPlanes(int convolutionSize, int numWPlanes, int textureSup
         fft2dShift(convolutionSize, screen, shift);
         
         if(iw == plane)
-            saveKernelToFile("wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
+            saveKernelToFile("output/wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
        
         // Normalize the kernel
         normalizeKernel(shift, convolutionSize, wFullSupport);
         
         if(iw == plane)
-            saveKernelToFile("wproj_%f_normalized_%d.csv", w, convolutionSize, shift);
+            saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, convolutionSize, shift);
         
         DoubleComplex *interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
         interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
         
         if(iw == plane)
-            saveKernelToFile("wproj_%f_interpolated_%d.csv", w, textureSupport, interpolated);
+            saveKernelToFile("output/wproj_%f_interpolated_%d.csv", w, textureSupport, interpolated);
         
         // Bind interpolated kernel to texture matrix
+        for(int y = 0; y < textureSupport; y++)
+        {
+            for(int x = 0; x < textureSupport; x++)
+            {
+                DoubleComplex interpWeight = interpolated[y * textureSupport + x];
+                FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
+                int index = (iw * textureSupport * textureSupport) + (y * textureSupport) + x;
+                wTextures[index] = weight;
+            }
+        }
         
         free(interpolated);
         memset(screen, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
@@ -787,6 +829,12 @@ void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf)
         
     // Calculate curve from steps
     calcSpheroidalCurve(nu, tempSpheroidal, wFullSupport);
+    
+    // Zero out first weight
+    tempSpheroidal[0] = 0.0;
+    // Zero out last weight to balance spheroidal
+    if(wFullSupport % 2 != 0)
+        tempSpheroidal[wFullSupport-1] = 0.0;
     
     // Bind weights to middle
     for(int i = convHalf-wHalfSupport; i <= convHalf+wHalfSupport; i++)
@@ -1065,7 +1113,12 @@ void getBicubicNeighbours(int x, int y, InterpolationPoint *neighbours, int orig
 
 float calcSpheroidalShift(int index, int width)
 {   
-    return -1.0 + index * getShift(width-1);
+    // Even
+    if(width % 2 == 0)
+        return -1.0 + index * getShift(width);
+    // Odd
+    else
+        return -1.0 + index * getShift(width-1);
 }
 
 float calcInterpolateShift(int index, int width, float start)
@@ -1109,4 +1162,3 @@ void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data)
     fclose(file);
     printf("FILE SAVED\n");
 }
-
