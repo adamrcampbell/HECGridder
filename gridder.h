@@ -1,4 +1,12 @@
 
+/*
+ * 
+ * Authors: Dr Seth Hall, Dr Andrew Ensor, Adam Campbell
+ * Auckland University of Technology - AUT
+ * High Performance Computing (HPC) Laboratory
+ * 
+ */
+
 #ifndef GRIDDER_H
 #define GRIDDER_H
 
@@ -15,21 +23,30 @@ typedef struct Config {
     unsigned int visibilityCount;
     unsigned int numVisibilityParams;
     bool visibilitiesFromFile;
-    char* visibilitySourceFile;
+    double frequencyStartHz;
+    bool offsetVisibilities;
+    bool compareToOxfordGrid;
+    bool useHeavyInterpolation;
 
     // GUI
     unsigned int refreshDelay;
     unsigned int displayDumpTime;
+    float graphicMultiplier;
     
     // W Projection
-    float cellSizeRad;
-    float uvScale;
-    float wScale;
-    float fieldOfView;
-    float wProjectionStep;
-    float wProjectionMaxW;
+    double cellSizeRad;
+    double uvScale;
+    double wScale;
+    double fieldOfView;
+    double wProjectionMaxW;
     unsigned int wProjectNumPlanes;
     double wToMaxSupportRatio;
+    
+    // Dataset File Locations
+    char* inputGridComparisonReal;
+    char* inputGridComparisonImag;
+    char* visibilitySourceFile;
+    
 } Config;
 
 typedef struct FloatComplex {
@@ -69,22 +86,19 @@ GLuint createProgram(GLuint fragmentShader, GLuint vertexShader);
 void timerEvent(int value);
 float timedifference_msec(struct timeval t0, struct timeval t1);
 void printTimesAverage(struct timeval realStart, int processStart, char description[]);
-void saveGridToFile(void);
+void saveGridToFile(int support);
 void loadVisibilitySamples(void);
 void compareToIdealGrid(void);
-void calculateSpheroidalCurve(float * nu, int kernelWidth);
 void createWProjectionPlanes(FloatComplex *wTextures);
 void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, double w, double fieldOfView, int scalarSupport);
 void calcSpheroidalCurve(double *nu, double *curve, int width);
 void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, DoubleComplex *output);
 void calcBitReversedIndices(int n, int* indices);
 void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted);
-void printGrid(void);
 
-DoubleComplex normalizeWeight(DoubleComplex weight, double mag, int resolution, int support);
-float calcInterpolateShift(int index, int width, float start);
+float calcInterpolateShift(float index, float width);
 double getShift(double width);
-void getBicubicNeighbours(int x, int y, InterpolationPoint *neighbours, int kernelFullSupport, int interpFullSupport, DoubleComplex* matrix);
+void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighbours, int resolutionSupport, DoubleComplex* matrix);
 InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, InterpolationPoint newPoint, int start, int width, bool horizontal);
 void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf);
 void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data);
@@ -96,6 +110,9 @@ DoubleComplex complexAdd(DoubleComplex x, DoubleComplex y);
 DoubleComplex complexSubtract(DoubleComplex x, DoubleComplex y);
 DoubleComplex complexMultiply(DoubleComplex x, DoubleComplex y);
 DoubleComplex complexConjugateExp(double ph);
-double complexMagnitude(DoubleComplex x);
+
+void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension);
+void loadGridFromFile(GLfloat *grid, int gridDimension);
 
 #endif /* GRIDDER_H */
+

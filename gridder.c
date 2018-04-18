@@ -1,9 +1,10 @@
 
-/* 
- * File:   gridder.c
- * Author: adam
- *
- * Created on 1 August 2017, 11:23 AM
+/*
+ * 
+ * Authors: Seth Hall, Andrew Ensor, Adam Campbell
+ * Auckland University of Technology - AUT
+ * High Performance Laboratory
+ * 
  */
 
 #include <stdio.h>
@@ -28,47 +29,44 @@
 // NAG Dataset configurations
 //
 //  File:           el82-70.txt
+//  Grid Size:      18000
 //  Min Support:    4.0
 //  Max Support:    44.0
-//  Max W:          6746.082031 //7000
+//  Max W:          7083.386050 // we assume
 //  Max Plane:      339.0
 //  Cell Size Rad:  0.000006
-//  Grid Size       18000
 //
 //  File:           el56-82.txt
+//  Grid Size:      18000
 //  Min Support:    4
 //  Max Support:    72
-//  Max W:          11937.875977   //12000
+//  Max W:          12534.770126 // we assume
 //  Max Plane:      601
 //  Cell Size Rad:  0.000006
 //
-//  File:           el30-56
+//  File:           el30-56.txt
+//  Grid Size:      18000
 //  Min Support:    4
 //  Max Support:    95
-//  Max W:          -18309 //19000
+//  Max W:          19225.322282 // we assume
 //  Max Plane:      922
 //  Cell Size Rad:  0.000006
 //
 //  File:           synthetic.txt
-//  Grid Size:      100000
+//  Grid Size:      10000
 //  Min Support:    4
 //  Max Support:    36
-//  Max W:          38971
+//  Max W:          40920.395944 // we assume
 //  Max Plane:      714
 //  Cell Size Rad:  0.000004
-
-// ADAMS TO DO LIST:
-// - W projection doesnt seem to hit max W value
 
 /*--------------------------------------------------------------------
  *   GUI CONFIG
  *-------------------------------------------------------------------*/
 static GLfloat guiRenderBounds[8];
-
 static GLuint sProgram;
 static GLuint sLocPosition;
 static GLuint sComplex;
-
 static GLuint guiRenderBoundsBuffer;
 static GLuint visibilityBuffer;
 static GLuint sLocPositionRender;
@@ -77,23 +75,28 @@ static GLuint uShaderTextureHandle;
 static GLuint uShaderTextureKernalHandle; 
 static GLuint uMinSupportOffset;
 static GLuint uWToMaxSupportRatio;
-static GLuint uGridSize;
+static GLuint uGridCenter;
+static GLuint uGridCenterOffset;
 static GLuint uGridSizeRender;
 static GLuint uWScale;
+static GLuint uWStep;
 static GLuint uUVScale; 
-
+static GLuint uNumPlanes;
 static GLuint fboID;
 static GLuint textureID;
 static GLuint kernalTextureID;
-
 static GLfloat* gridBuffer;
 static FloatComplex* kernelBuffer;
 static GLuint* visibilityIndices;
 static GLfloat* visibilities;
 
+// Used for counting gridding iterations performed
 int iterationCount = 0;
+int totalDumpsPerformed = 0;
+int teminationDumpCount;
 
-int counter =0;
+// Used for timing of gridder
+int counter = 0;
 int counterAverage;
 double sumTimeReal;
 float sumTimeProcess;
@@ -108,21 +111,75 @@ Config config;
 
 void initConfig(void) 
 {
-    // Global
+    // Scale grid dimension down for GUI rendering
     windowDisplay = 900;
-    config.kernelTexSize = 128;                             // kernelTexSize >= kernelMaxFullSupport
-    config.kernelResolutionSize = 256;                      // Always a power of 2 greater than the textureSize MINIMUM
-    config.gridDimension = 18000;
-    config.kernelMaxFullSupport = (44.0f * 2.0f) + 1.0f;    // kernelMaxFullSupport <= kernelResolutionSize
+    
+    // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
+    // Tradeoff note: higher values result in better precision, but result in more memory used and 
+    // slower rendering to the grid in GPU
+    config.kernelTexSize = 128;
+    
+    // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
+    // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
+    // due to use of FFT procedure (512 is a good value to use)
+    config.kernelResolutionSize = 512;
+    
+    // Single dimension of the grid
+    config.gridDimension = 18000.0f;
+    
+    // Full support of min/max kernel supported per observation
+    // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
+    config.kernelMaxFullSupport = (44.0f * 2.0f) + 1.0f;
     config.kernelMinFullSupport = (4.0f * 2.0f) + 1.0f;
+    
+    // Number of visibilities to process (is set when reading visibilities from file)
+    // Note: if not reading from file, then must be manually changed.
     config.visibilityCount = 1;
-    // config.visibilityCount = 1;//31395840;
-    config.numVisibilityParams = 5;
+    
+    // Flag to determine if reading visibilities from a source file
     config.visibilitiesFromFile = true;
-    config.displayDumpTime = 50;
-    config.visibilitySourceFile = "datasets/el82-70.txt"; //"el82-70_vis.txt";
-    // Gui
+    
+    // Source of visibility data
+    config.visibilitySourceFile = "datasets/el82-70.txt";
+    
+    // Scalar value for scaling visibility UVW wavelengths to coordinates
+    config.frequencyStartHz = 100000000.0;
+    
+    // Flag to determine grid center offset (true: indicates grid points land in the middle of a pixel 
+    // (same as oxford gridder), false: indicates grid points should fall in between pixels (other implementations))
+    config.offsetVisibilities = true;
+    
+    // Uses heavy interpolation for convolving visibilities to grid (on GPU)
+    // Note: slows down gridding a batch of visibilities, but improves precision
+    config.useHeavyInterpolation = true;
+    
+    // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
+    config.numVisibilityParams = 6;
+    
+    // Number of gridding iterations to perform before terminating (all visibilities convolved each iteration)
+    config.displayDumpTime = 1;
+    
+    // variable used to control when the Gridder will exit after reaching the dump count, 
+    // use a negative value to keep "infinite" gridding. 
+    // Note: number of actual iterations is terminationDumpCount * displayDumpTime assuming dumpCount positive
+    teminationDumpCount = 1;
+    
+    // Flag if want to compare HEC gridder output to Oxford gridder output (ensure file input locations are defined)
+    // Note: only compares on first iteration, remainder are just processed for timing output and GUI rendering.
+    // Also only can compare the two grids at the same interval as the dump time
+    config.compareToOxfordGrid = true;
+    
+    // Source of Oxford grid output (real component)
+    config.inputGridComparisonReal = "grids/oxford_grid_82-70_real.csv";
+    
+    // Source of Oxford grid output (imaginary component)
+    config.inputGridComparisonImag = "grids/oxford_grid_82-70_imag.csv";
+    
+    // Used to slow down GUI rendering (milliseconds) - 0 means no delay, 1000 means one second delay
     config.refreshDelay = 0;
+    
+    // Calculates the OpenGL "world" coordinate system for gridding
+    // Note: grid center (0.0, 0.0) is center of world
     float gridDimFloat = (float) config.gridDimension;
     GLfloat renderTemp[8] = {
         -gridDimFloat/2.0f, -gridDimFloat/2.0f,
@@ -132,20 +189,65 @@ void initConfig(void)
     };
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
     
-    // W-Projection
-    config.wProjectionMaxW = 7000.0f;
-    config.cellSizeRad = 0.000006;
-    config.wProjectNumPlanes = 339;//(int) (config.wProjectionMaxW * fabs(sin(config.cellSizeRad * (double) config.gridDimension / 2.0)));
-    config.wScale = pow(config.wProjectNumPlanes-1, 2.0) / config.wProjectionMaxW; // (config.wProjectNumPlanes * config.wProjectNumPlanes) / config.wProjectionMaxW;
-    config.wProjectionStep = config.wProjectionMaxW / config.wScale;
-    config.fieldOfView = config.cellSizeRad *  config.gridDimension;
-    config.uvScale = config.fieldOfView * 1.0; // second factor for scaling
-    config.wToMaxSupportRatio = (config.kernelMaxFullSupport - config.kernelMinFullSupport) / config.wProjectionMaxW;
+    // Maximum W term to support
+    config.wProjectionMaxW = 7083.386050;
     
-    printf("W Scale: %f\n", config.wScale);
-    printf("W Max Support Ratio: %f\n", config.wToMaxSupportRatio);
+    // Cell size radians for observation
+    config.cellSizeRad = 0.00000639708380288949;
+    
+    // Number of W planes to create
+    config.wProjectNumPlanes = 339;
+    
+    // Scales W terms (used on GPU to determine w plane index)
+    config.wScale = pow((double) config.wProjectNumPlanes, 2.0) / config.wProjectionMaxW;
+    
+    // Field of view for observation (relies on original grid dimension)
+    config.fieldOfView = config.cellSizeRad * (double) config.gridDimension;
+    
+    // Custom variable for scaling the UVScale (used for testing, zooms the GUI rendered visibilities)
+    config.graphicMultiplier = 1.0f;
+    
+    // Scales visibility UV coordinates to grid coordinates
+    config.uvScale = (double) config.gridDimension * config.cellSizeRad * config.graphicMultiplier; 
+    
+    // Used to calculate required W full support per w term
+    config.wToMaxSupportRatio = ((config.kernelMaxFullSupport - config.kernelMinFullSupport) / config.wProjectionMaxW);
 }
 
+int main(int argc, char** argv) {
+    
+    initConfig();
+    
+    srand((unsigned int) time(NULL));
+    setenv("DISPLAY", ":0", 11.0);
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
+    glutInitWindowSize(windowDisplay, windowDisplay);
+    glutInitWindowPosition(0, 0);
+    glutCreateWindow("HEC Gridder");
+    glutDisplayFunc(runGridder);
+    glutTimerFunc(config.refreshDelay, timerEvent, 0);
+    //glewInit();
+    glewExperimental = GL_TRUE;
+    GLenum err = glewInit();
+    if (err != GLEW_OK) {
+        printf("ERR: Unable to load and run Gridder!\n");
+    }
+
+    initGridder();
+    glutMainLoop();
+    return (EXIT_SUCCESS);
+}
+
+/*
+ * Function: initGridder 
+ * --------------------
+ *  Initialises the openGL context for gridding, loads visibilities from file, 
+ *  sets up vertex/fragment shaders for gridding, binds grid memory to GPU,
+ *  and creates w projection kernels for later use.
+ *
+ *  returns: nothing
+ */
 void initGridder(void) 
 {    
     glClampColorARB(GL_CLAMP_VERTEX_COLOR_ARB, GL_FALSE);
@@ -155,14 +257,7 @@ void initGridder(void)
     srand(time(NULL));
     int size = 4 * config.gridDimension*config.gridDimension;
     gridBuffer = (GLfloat*) malloc(sizeof (GLfloat) * size);
-
-    for (int i = 0; i < size; i += 4) 
-    {
-        gridBuffer[i] = 0.0f;
-        gridBuffer[i + 1] = 0.0f;
-        gridBuffer[i + 2] = 0.0f;
-        gridBuffer[i + 3] = 0.0f;
-    }
+    memset(gridBuffer, 0, size);
 
     if(config.visibilitiesFromFile)
     {
@@ -173,26 +268,22 @@ void initGridder(void)
             int visCount = 0;
             fscanf(file, "%d\n", &visCount);
             config.visibilityCount = visCount;
-            printf("READING %d number of visibilities from file ",config.visibilityCount);
+            printf("READING %d number of visibilities from file \n",config.visibilityCount);
             visibilities = malloc(sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount);
             float temp_uu, temp_vv, temp_ww = 0.0f;
-            float temp_real, temp_imag = 0.0f;
+            float temp_real, temp_imag = 0.0f, temp_weight = 0.0f;
+            double scale = config.frequencyStartHz / 299792458.0; // convert from wavelengths
+            
             for(int i = 0; i < config.visibilityCount * config.numVisibilityParams; i+=config.numVisibilityParams)
             {
-                fscanf(file, "%f %f %f %f %f\n", &temp_uu, &temp_vv, &temp_ww, &temp_real, &temp_imag);
+                fscanf(file, "%f %f %f %f %f %f\n", &temp_uu, &temp_vv, &temp_ww, &temp_real, &temp_imag, &temp_weight);
                 
-//                int randomKernel = (int)((float)rand()/RAND_MAX * 44)+44;
-//
-//                while(randomKernel % 2 == 0)
-//                {
-//                    randomKernel = (int)((float)rand()/RAND_MAX * 44)+44;
-//                }
-                
-                visibilities[i] = temp_uu;
-                visibilities[i + 1] = temp_vv;
-                visibilities[i + 2] = temp_ww;//(float) randomKernel;//37.0f; //temp_ww;
-                visibilities[i + 3] = temp_real; // remove abs
-                visibilities[i + 4] = temp_imag; // remove abs
+                visibilities[i] = (-temp_uu * scale); // right ascension
+                visibilities[i + 1] = (temp_vv * scale);
+                visibilities[i + 2] = temp_ww * scale;
+                visibilities[i + 3] = temp_real;
+                visibilities[i + 4] = temp_imag;
+                visibilities[i + 5] = temp_weight;
             }
             
             fclose(file);
@@ -209,9 +300,13 @@ void initGridder(void)
         visibilityIndices[i] = i;
     }
     
-   // char buffer[2000];
-    //sprintf(buffer, VERTEX_SHADER, config.gridDimension);
-    GLuint vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER);
+    GLuint vertexShader;
+    
+    if(config.useHeavyInterpolation)
+        vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER);
+    else
+        vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER_SNAP);
+    
     GLuint fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
     sProgram = createProgram(vertexShader, fragmentShader);
     sLocPosition = glGetAttribLocation(sProgram, "position");
@@ -219,11 +314,13 @@ void initGridder(void)
     uShaderTextureKernalHandle = glGetUniformLocation(sProgram, "kernalTex");
     uMinSupportOffset = glGetUniformLocation(sProgram, "minSupportOffset");
     uWToMaxSupportRatio = glGetUniformLocation(sProgram, "wToMaxSupportRatio");
-    uGridSize = glGetUniformLocation(sProgram, "gridSize");
+    uGridCenter = glGetUniformLocation(sProgram, "gridCenter");
+    uGridCenterOffset = glGetUniformLocation(sProgram, "gridCenterOffset");
     uWScale = glGetUniformLocation(sProgram, "wScale");
+    uWStep = glGetUniformLocation(sProgram, "wStep");
     uUVScale = glGetUniformLocation(sProgram, "uvScale");
+    uNumPlanes = glGetUniformLocation(sProgram, "numPlanes");
 
-   // sprintf(buffer, VERTEX_SHADER_RENDER, config.gridDimension);
     vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER_RENDER);
     fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_RENDER);
     sProgramRender = createProgram(vertexShader, fragmentShader);
@@ -237,13 +334,11 @@ void initGridder(void)
 
     //Generate Texture for output.
     glGenBuffers(1, &visibilityBuffer);
-
     GLuint idArray[2];
-
     glGenTextures(2, idArray);
     textureID = idArray[0];
     glBindTexture(GL_TEXTURE_2D, textureID);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -285,36 +380,60 @@ void initGridder(void)
     timeCallsProcess = clock();
 }
 
-
+/*
+ * Function: setShaderUniforms 
+ * --------------------
+ *  Sets gridding uniforms for use within vertex/fragment shaders
+ *
+ *  returns: nothing
+ */
 void setShaderUniforms(void)
 {
     printf("SETTING THE SHADER UNIFORMS\n");
     glUseProgram(sProgram);
     glUniform1f(uMinSupportOffset, config.kernelMinFullSupport);
     glUniform1f(uWToMaxSupportRatio, (config.kernelMaxFullSupport-config.kernelMinFullSupport)/config.wProjectionMaxW); //(maxSuppor-minSupport) / maxW
-    glUniform1f(uGridSize, config.gridDimension);
+    glUniform1f(uGridCenter, ((float) config.gridDimension - 0.5) / 2.0);
+    float centerOffset = config.offsetVisibilities ? (0.5 / ((float) config.gridDimension / 2.0)) : 0.0;
+    printf("Center Offset: %f\n", centerOffset);
+    glUniform1f(uGridCenterOffset, centerOffset);
     glUniform1f(uWScale, config.wScale);
+    glUniform1f(uWStep, 1.0 / (float) config.wProjectNumPlanes);
     glUniform1f(uUVScale, config.uvScale);
+    glUniform1f(uNumPlanes, config.wProjectNumPlanes);
     glUseProgram(0);
     
     glUseProgram(sProgramRender);
     glUniform1f(uGridSizeRender, config.gridDimension);
     glUseProgram(0);  
-     printf("DONE WITH SETTING THE SHADER UNIFORMS\n");
+    printf("DONE WITH SETTING THE SHADER UNIFORMS\n");
 }
 
-
+/*
+ * Function: runGridder 
+ * --------------------
+ *  Binds visibility data to the GPU, grids visibility data on GPU,
+ *  optionally renders grid to GUI, and optionally compares gridded result
+ *  to another grid from file
+ *
+ *  returns: nothing
+ */
 void runGridder(void) {
     
+    // Used for testing 
     if(!config.visibilitiesFromFile)
     {
+        // convert from wavelengths
+        double scale = config.frequencyStartHz / 299792458.0;
+        
         for (int i = 0; i < config.visibilityCount * config.numVisibilityParams; i += config.numVisibilityParams) {
-
-            visibilities[i] = 0.0f;//(float) (rand() % (int) config.gridDimension);
-            visibilities[i + 1] = 0.0f;//(float) (rand() % (int) config.gridDimension);
-            visibilities[i + 2] = 7000.0f;//(float) randomKernel;
-            visibilities[i + 3] = 1.0f;//((float)rand()/RAND_MAX * 2.0f)-1.0f;
-            visibilities[i + 4] = 1.0f;//((float)rand()/RAND_MAX * 2.0f)-1.0f;
+            // U, V, W, Real, Imaginary, Weight
+            visibilities[i] =  0.0 * scale;
+            visibilities[i + 1] = 0.0 * scale;
+            visibilities[i + 2] = 0.0 * scale;
+            visibilities[i + 3] = 1.0;
+            visibilities[i + 4] = 0.0;
+            visibilities[i + 5] = 1.0f;
         }
     }
 
@@ -326,65 +445,50 @@ void runGridder(void) {
     gettimeofday(&timeFunctionReal, 0);
     int timeFunctionProcess = clock();
 
-    // glPushAttrib(GL_VIEWPORT_BIT);
-
     glUseProgram(sProgram);
-
     glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
     glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
-    // glBindBuffer(GL_ARRAY_BUFFER, guiRenderBoundsBuffer);
-
     glBindTexture(GL_TEXTURE_3D, kernalTextureID);
     glUniform1i(uShaderTextureKernalHandle, 0);
-
-    //glBindBuffer(GL_ARRAY_BUFFER, guiRenderBoundsBuffer);
     glBindBuffer(GL_ARRAY_BUFFER, visibilityBuffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount, visibilities, GL_STATIC_DRAW);
     glEnableVertexAttribArray(sLocPosition);
     glVertexAttribPointer(sLocPosition, 3, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), 0);
     glEnableVertexAttribArray(sComplex);
-    glVertexAttribPointer(sComplex, 2, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), (void*) (3*sizeof(GLfloat)));
-
-//    int batchSize = config.visibilityCount/16;
-//    int end = batchSize;
-//    int start = 0;
-//    for(int i=0;i<16;i++)
-//    {
-//        glDrawArrays(GL_POINTS, start, end);
-//       // glFinish();
-//        start += batchSize;
-//        end +=batchSize;
-//    }
+    glVertexAttribPointer(sComplex, 3, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), (void*) (3*sizeof(GLfloat)));
     
-    glDrawArrays(GL_POINTS, 0, config.visibilityCount);
+    int batchSize = config.visibilityCount;
+    int end = batchSize;
+    int start = 0;
+    //for(int i=0;i<10;i++)
+    {   
+        printf("doing batches from %d to %d\n", start, end);
+       // glDrawElements(GL_POINT, 10, GL_UNSIGNED_INT, visibilityIndices);
+        glDrawArrays(GL_POINTS, start, end);
+        glFinish();
+        
+        start += batchSize;
+        end +=batchSize;
+    }
      
     for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError()) {
         fprintf(stderr, "%d: %s\n", err, gluErrorString(err));
     }
     glDisableVertexAttribArray(sComplex);
     glDisableVertexAttribArray(sLocPosition);
-    //glDisableVertexAttribArray(sLocColor);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindTexture(GL_TEXTURE_3D, 0);
     glUseProgram(0);
     
     glDisable(GL_BLEND);
-    
-    iterationCount++;
-    
-    
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    //glPopAttrib();
 
-        
-   glFlush();
-   glFinish();
+    glFinish();
     //DRAW RENDERING
-     glViewport(0, 0, windowDisplay, windowDisplay);
+    glViewport(0, 0, windowDisplay, windowDisplay);
     glUseProgram(sProgramRender);
     glBindTexture(GL_TEXTURE_2D, textureID);
     glUniform1i(uShaderTextureHandle, 0);
-
 
     glBindBuffer(GL_ARRAY_BUFFER, guiRenderBoundsBuffer);
     glEnableVertexAttribArray(sLocPositionRender);
@@ -400,131 +504,47 @@ void runGridder(void) {
     glUseProgram(0);
 
     counter++;
- 
+    iterationCount++;
+    
+    bool dumped = false;
     if(iterationCount == config.displayDumpTime)
-    {   glFlush();
-        glFinish();
+    {   printf("Dumping grid from GPU back to host\n");
         glBindFramebuffer(GL_FRAMEBUFFER, fboID);
         iterationCount = 0;
-        printGrid();
+        
+        // Ensure OpenGL has finished
+        glFinish();
+        glReadPixels(0, 0, config.gridDimension, config.gridDimension,  GL_RGBA, GL_FLOAT, gridBuffer);
+        glFinish();
+        
+        // This function can be used if you wish to save the gridder results to file
+        // Saves convolutional weights, grid real, and grid imaginary
+        //saveGridToFile(config.gridDimension);
+        
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        dumped = true;
+        totalDumpsPerformed++;
     }
-    glFlush();
-    glFinish();
     
+    glFinish();
     glutSwapBuffers();
-       printTimesAverage(timeFunctionReal,timeFunctionProcess,"ENTIRE FUNCTION TIME");
+    printTimesAverage(timeFunctionReal,timeFunctionProcess,"ENTIRE FUNCTION TIME");
     gettimeofday(&timeCallsReal, 0);
     timeCallsProcess = clock();
-     
-}
-
-void printGrid(void)
-{
-    glFinish();
-    glReadPixels(0, 0, config.gridDimension, config.gridDimension, GL_RGBA, GL_FLOAT, gridBuffer);
-    glFinish();
-    int printSUM = 12;//config.gridDimension;//
-//    //printf("Sampled Grid\n");
-//    for(int row = 0; row < config.gridDimension; row++)
-//    {
-//        for(int col = 0; col < (config.gridDimension*4); col+=4)
-//        {
-//            float r = gridBuffer[(row*(int)config.gridDimension*4)+col];
-//            float g = gridBuffer[(row*(int)config.gridDimension*4)+col+1];
-////            float b = gridBuffer[(row*(int)config.gridDimension*4)+col+2];
-////            float a = gridBuffer[(row*(int)config.gridDimension*4)+col+3];
-//           // if(r > 0.001 || g > 0.001)
-//               printf("(%.2f)",r);
-//
-//        }
-//        printf("\n");
-//    }
-    printf("\nTransfered back completed!!!!!!!!\n");
-}
-
-int main(int argc, char** argv) {
     
-    initConfig();
-    
-    srand((unsigned int) time(NULL));
-    setenv("DISPLAY", ":0", 11.0);
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
-    glutInitWindowSize(windowDisplay, windowDisplay);
-    glutInitWindowPosition(0, 0);
-    glutCreateWindow("HEC Gridder");
-    glutDisplayFunc(runGridder);
-    glutTimerFunc(config.refreshDelay, timerEvent, 0);
-    //glewInit();
-    glewExperimental = GL_TRUE;
-    GLenum err = glewInit();
-    if (err != GLEW_OK) {
-        printf("ERR: Unable to load and run Gridder!\n");
-    }
-
-    initGridder();
-    glutMainLoop();
-    return (EXIT_SUCCESS);
-}
-
-void calculateSpheroidalCurve(float * nu, int kernelWidth)
-{   
-    float p[2][5] = {{8.203343e-2, -3.644705e-1, 6.278660e-1, -5.335581e-1, 2.312756e-1},
-                     {4.028559e-3, -3.697768e-2, 1.021332e-1, -1.201436e-1, 6.412774e-2}};
-    float q[2][3] = {{1.0000000e0, 8.212018e-1, 2.078043e-1},
-                     {1.0000000e0, 9.599102e-1, 2.918724e-1}};
-    
-    int pNum = 5;
-    int qNum = 3;
-    
-    for(int i = 0; i < kernelWidth; i++)
-        nu[i] = fabsf(nu[i]);
-    
-    int part[kernelWidth];
-    float nuend[kernelWidth];
-    for(int i = 0; i < kernelWidth; i++)
+    if(config.compareToOxfordGrid && totalDumpsPerformed == 1 && dumped)
     {
-        if(nu[i] >= 0.0f && nu[i] <= 0.75f)
-            part[i] = 0;
-        else if(nu[i] > 0.75f && nu[i] < 1.0f)
-            part[i] = 1;
-        
-        if(nu[i] >= 0.0f && nu[i] <= 0.75f)
-            nuend[i] = 0.75f;
-        else if(nu[i] > 0.75f && nu[i] < 1.0f)
-            nuend[i] = 1.0f;      
+        int gridElements = 4 * config.gridDimension * config.gridDimension;
+        GLfloat *inputGrid = (GLfloat*) malloc(sizeof (GLfloat) * gridElements);
+        loadGridFromFile(inputGrid, config.gridDimension);
+        compareGrids(gridBuffer, inputGrid, config.gridDimension);
+        free(inputGrid);
     }
-    
-    float delnusq[kernelWidth];
-    for(int i = 0; i < kernelWidth; i++)
-        delnusq[i] = (nu[i] * nu[i]) - (nuend[i] * nuend[i]);
-    
-    float top[kernelWidth];
-    for(int i = 0; i < kernelWidth; i++)
-        top[i] = p[part[i]][0];
-    
-    for(int i = 1; i < pNum; i++)
-        for(int y = 0; y < kernelWidth; y++)
-            top[y] += (p[part[y]][i] * pow(delnusq[y], i)); 
-    
-    float bottom[kernelWidth];
-    for(int i = 0; i < kernelWidth; i++)
-        bottom[i] = q[part[i]][0];
-    
-    for(int i = 1; i < qNum; i++)
-        for(int y = 0; y < kernelWidth; y++)
-            bottom[y] += (q[part[y]][i] * pow(delnusq[y], i));
-    
-    for(int i = 0; i < kernelWidth; i++)
-    {   
-        float absNu = abs(nu[i]);
-        nu[i] = (bottom[i] > 0.0f) ? top[i]/bottom[i] : 0.0f;
-        if(absNu > 1.0f)
-            nu[i] = 0.0f;
-    }
+    // Terminate program
+    if(totalDumpsPerformed == teminationDumpCount)
+        exit(0);
 }
 
 void timerEvent(int value) {
@@ -568,12 +588,19 @@ void printTimesAverage(struct timeval realStart, int processStart, char descript
         msecAvg=0;
         timetimeAvg =0;
         timetimeSquareAvg = 0;
-        counter = 0;
-         //toggle = 1;
-        // usleep(5000000);
+        counter = 0; 
     }
 }
 
+/*
+ * Function: checkShaderStatus 
+ * --------------------
+ *  Ensures an openGL shader is ready for use.
+ *
+ *  shader: The shader object to be verified
+ * 
+ *  returns: nothing
+ */
 void checkShaderStatus(GLuint shader) {
     GLint status;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
@@ -589,6 +616,15 @@ void checkShaderStatus(GLuint shader) {
     printf("DONE\n\n");
 }
 
+/*
+ * Function: checkProgramStatus 
+ * --------------------
+ *  Ensures an openGL program is ready for use.
+ *
+ *  shader: The program object to be verified
+ * 
+ *  returns: nothing
+ */
 void checkProgramStatus(GLuint program) {
     GLint status;
     printf("CHECKING PROGRAM STATUS\n");
@@ -604,6 +640,16 @@ void checkProgramStatus(GLuint program) {
     printf("DONE\n\n");
 }
 
+/*
+ * Function: createShader 
+ * --------------------
+ *  Creates a new instance of an OpenGL shader object
+ *
+ *  shaderType: The desired OpenGL shader type (eg; GL_VERTEX_SHADER)
+ *  shaderSource: The location of the shader code (refer to gpu.h)
+ * 
+ *  returns: The new shader instance
+ */
 GLuint createShader(GLenum shaderType, const char* shaderSource) {
     GLuint shader = glCreateShader(shaderType);
     glShaderSource(shader, 1, (const GLchar **) &shaderSource, NULL);
@@ -612,6 +658,16 @@ GLuint createShader(GLenum shaderType, const char* shaderSource) {
     return shader;
 }
 
+/*
+ * Function: createProgram 
+ * --------------------
+ *  Creates a new instance of an OpenGL program object
+ *
+ *  fragmentShader: The fragment shader stage for use within the program object
+ *  vertexShader: The vertex shader stage for use within the program object
+ * 
+ *  returns: The new program instance
+ */
 GLuint createProgram(GLuint fragmentShader, GLuint vertexShader) {
     GLuint program = glCreateProgram();
     glAttachShader(program, fragmentShader);
@@ -621,6 +677,16 @@ GLuint createProgram(GLuint fragmentShader, GLuint vertexShader) {
     return program;
 }
 
+/*
+ * Function: complexAdd 
+ * --------------------
+ *  Produces the sum two complex numbers
+ *
+ *  x : the first complex number
+ *  y : the second complex number
+ * 
+ *  returns: The sum of the two complex numbers
+ */
 DoubleComplex complexAdd(DoubleComplex x, DoubleComplex y)
 {
     DoubleComplex z;
@@ -629,6 +695,16 @@ DoubleComplex complexAdd(DoubleComplex x, DoubleComplex y)
     return z;
 }
 
+/*
+ * Function: complexSubtract 
+ * --------------------
+ *  Produces the difference of two complex numbers
+ *
+ *  x : the first complex number
+ *  y : the second complex number
+ * 
+ *  returns: The difference of the two complex numbers
+ */
 DoubleComplex complexSubtract(DoubleComplex x, DoubleComplex y)
 {
     DoubleComplex z;
@@ -637,6 +713,16 @@ DoubleComplex complexSubtract(DoubleComplex x, DoubleComplex y)
     return z;
 }
 
+/*
+ * Function: complexMultiply 
+ * --------------------
+ *  Produces the product of two complex numbers
+ *
+ *  x : the first complex number
+ *  y : the second complex number
+ * 
+ *  returns: The product of the two complex numbers
+ */
 DoubleComplex complexMultiply(DoubleComplex x, DoubleComplex y)
 {
     DoubleComplex z;
@@ -645,85 +731,131 @@ DoubleComplex complexMultiply(DoubleComplex x, DoubleComplex y)
     return z;
 }
 
+/*
+ * Function: complexConjugateExp 
+ * --------------------
+ *  Produces a complex conjugate based on the supplied phase term 
+ *
+ *  ph : the phase term being evaluated
+ * 
+ *  returns: The complex conjugate of the phase
+ */
 DoubleComplex complexConjugateExp(double ph)
 {
     return (DoubleComplex) {.real = cos((double)(2.0*M_PI*ph)), .imaginary = -sin((double)(2.0*M_PI*ph))};
 }
 
-double complexMagnitude(DoubleComplex x)
-{
-    return sqrt(x.real * x.real + x.imaginary * x.imaginary);
-}
-
+/*
+ * Function: calcWFullSupport 
+ * --------------------
+ *  Calculates the full w support required for a specific w term
+ *  (even supports are rounded up to next odd to ensure a peak in the prolate spheroidal)
+ *
+ *  w : the w term being evaluated
+ *  wToMaxSupportRatio: The ratio between min/max full kernel support and the maximum w per observation
+ *  minSupport: The minimum full support used in an observation
+ * 
+ *  returns: An odd full support dependant on the w term provided
+ */
 int calcWFullSupport(double w, double wToMaxSupportRatio, double minSupport)
 {
     // Calculates the full support width of a kernel for w term
-    return (int) (fabs(wToMaxSupportRatio * w) + minSupport);
+    // Round up to next odd (ensures peak in prolate spheroidal calculation)
+    int wSupport = (int) (fabs(wToMaxSupportRatio * w) + minSupport);
+    return (wSupport % 2 == 0) ? wSupport+1 : wSupport;
 }
 
+/*
+ * Function: normalizeKernel 
+ * --------------------
+ * Normalizes a complex w projection kernel scaled for the full support 
+ * which it will become when shrunk down on the GPU.
+ *
+ * kernel : the complex w projection kernel
+ * resolution : the width/height of the kernel
+ * support : the full support which to be scaled by for use on GPU
+ * 
+ * returns: nothing
+ */
 void normalizeKernel(DoubleComplex *kernel, int resolution, int support)
 {
-    // Get sum of magnitudes
-    double magnitudeSum;
+    // Get sum of realSum
+    double realSum = 0.0, imagSum = 0.0;
     int r, c;
     for(r = 0; r < resolution; r++)
+    {
         for(c = 0; c < resolution; c++)
-            magnitudeSum += complexMagnitude(kernel[r * resolution + c]);
+        {
+            realSum += kernel[r * resolution + c].real;   
+            imagSum += kernel[r * resolution + c].imaginary;
+        }
+    }
     
+    double scaleFactor = pow((double)resolution/(double)support, 2.0) / realSum;
+
     // Normalize weights
     for(r = 0; r < resolution; r++)
         for(c = 0; c < resolution; c++)
-            kernel[r * resolution + c] = normalizeWeight(kernel[r * resolution + c], magnitudeSum, resolution, support);
+        {
+            kernel[r * resolution + c].real *= scaleFactor;
+            kernel[r * resolution + c].imaginary *= scaleFactor;
+        }
 }
 
-DoubleComplex normalizeWeight(DoubleComplex weight, double mag, int resolution, int support)
-{
-    DoubleComplex normalized;
-    double t2 = (resolution*resolution)/(support*support);
-    normalized.real = (weight.real / mag) * t2;
-    normalized.imaginary = (weight.imaginary / mag) * t2;
-    return normalized;
-}
-
-void interpolateKernel(DoubleComplex *source, DoubleComplex* dest, int origSupport, int texSupport)
+/*
+ * Function: interpolateKernel 
+ * --------------------
+ * Performs a two dimensional bicubic interpolation on a w projection kernel
+ * to shrink it down to the desired full support specified in textureSupport
+ * 
+ * source : the source w projection kernel to be interpolated upon
+ * destination : the destination memory for storing interpolated kernel
+ * resolutionSupport : the width/height of the source kernel
+ * textureSupport : the width/height of the destination kernel
+ * 
+ * returns: nothing
+ */
+void interpolateKernel(DoubleComplex *source, DoubleComplex* dest, int resolutionSupport, int textureSupport)
 {   
     // Perform bicubic interpolation
     InterpolationPoint neighbours[16];
     InterpolationPoint interpolated[4];
     float xShift, yShift;
     
-    for(int y = 0; y < texSupport; y++)
+    for(int y = 0; y < textureSupport; y++)
     {
-        yShift = calcInterpolateShift(y, texSupport, -0.5)+(getShift(texSupport)/(4.0));
+        yShift = calcInterpolateShift((float) y, (float) (textureSupport-1));
         
-        for(int x = 0; x < texSupport; x++)
+        for(int x = 0; x < textureSupport; x++)
         {
-            xShift = calcInterpolateShift(x, texSupport, -0.5)+(getShift(texSupport)/(4.0));
-            getBicubicNeighbours(x, y, neighbours, origSupport, texSupport, source);
+            xShift = calcInterpolateShift((float) x, (float) (textureSupport-1));
+            getBicubicNeighbours(xShift, yShift, neighbours, resolutionSupport, source);
             
             for(int i  = 0; i < 4; i++)
             {
-                InterpolationPoint newPoint = (InterpolationPoint) {.xShift = xShift, .yShift = neighbours[i*4].yShift};
-                newPoint = interpolateCubicWeight(neighbours, newPoint, i*4, origSupport, true);
+                InterpolationPoint newPoint = (InterpolationPoint) {.xShift = xShift, .yShift = neighbours[(i*4)+1].yShift};
+                newPoint = interpolateCubicWeight(neighbours, newPoint, i*4, resolutionSupport-1, true);
                 interpolated[i] = newPoint;
-                
-//                printf("[%f, %f] ", newPoint.yShift, newPoint.xShift);
-//                printf("%f %f %f %f %f\n", neighbours[0].xShift, neighbours[1].xShift, newPoint.xShift, neighbours[2].xShift, neighbours[3].xShift);
-//                printf("%f %f %f %f %f\n", neighbours[0].yShift, neighbours[1].yShift, newPoint.yShift, neighbours[2].yShift, neighbours[3].yShift);
             }
-//            printf("\n");
-
-            // printf("[X: %f, Y: %f] ", xShift, yShift);
             
             InterpolationPoint final = (InterpolationPoint) {.xShift = xShift, .yShift = yShift};
-            final = interpolateCubicWeight(interpolated, final, 0, origSupport, false);
-            int index = y * texSupport + x;
+            final = interpolateCubicWeight(interpolated, final, 0, resolutionSupport-1, false);
+            int index = y * textureSupport + x;
             dest[index] = (DoubleComplex) {.real = final.weight.real, .imaginary = final.weight.imaginary};
         }
-//        printf("\n");
     }
 }
 
+/*
+ * Function: createWProjectionPlanes 
+ * --------------------
+ * Creates all w projection planes between 0 and maximum W term provided in
+ * the gridder config struct.
+ * 
+ * wTextures : the block of memory for storing N number of w projection kernels
+ * 
+ * returns: nothing
+ */
 void createWProjectionPlanes(FloatComplex *wTextures)
 {                
     int convolutionSize = config.kernelResolutionSize;
@@ -740,31 +872,21 @@ void createWProjectionPlanes(FloatComplex *wTextures)
     // Single dimension spheroidal
     double *spheroidal = calloc(convolutionSize, sizeof(double));
     
-    // numWPlanes = 2;//numWPlanes-1;
-    int plane = numWPlanes-1;
+     // Test variable to output W plane creation steps
+    // (phase screen, after fft, interpolated, normalized)
+    int plane = -1;
     printf("Num W Planes: %d\n", numWPlanes);
     for(int iw = 0; iw < numWPlanes; iw++)
     {        
         // Calculate w term and w specific support size
         double w = iw * iw / wScale;
         double fresnel = w * ((0.5 * config.fieldOfView)*(0.5 * config.fieldOfView));
-        printf("CreateWTermLike: For w = %f, field of view = %f, fresnel number = %f\n", w, config.fieldOfView, fresnel);
         int wFullSupport = calcWFullSupport(w, config.wToMaxSupportRatio, config.kernelMinFullSupport);
+        printf("Creating W Plane: (%d) For w = %f, field of view = %f, " \
+                "fresnel number = %f, full w support: %d\n", iw, w, config.fieldOfView, fresnel, wFullSupport);
+        
         // Calculate Prolate Spheroidal
         createScaledSpheroidal(spheroidal, wFullSupport, convHalf);
-        
-//        // Prints prolate spheroidal
-//        for(int i = 0; i < convolutionSize; i++)
-//        {
-//            for(int j = 0; j < convolutionSize; j++)
-//            {
-//                printf("%f ", spheroidal[i] * spheroidal[j]);
-//            }
-//            printf("\n");
-//        }
-//        
-//        for(int i = 0; i < convolutionSize; i++)
-//            printf("%f\n", spheroidal[i]);
         
         // Create Phase Screen
         createPhaseScreen(convolutionSize, screen, spheroidal, w, fov, wFullSupport);
@@ -779,18 +901,19 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         
         if(iw == plane)
             saveKernelToFile("output/wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
-       
-        // Normalize the kernel
-        normalizeKernel(shift, convolutionSize, wFullSupport);
         
-        if(iw == plane)
-            saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, convolutionSize, shift);
-        
+        // Interpolate w projection kernel down to texture support dimensions
         DoubleComplex *interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
         interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
         
         if(iw == plane)
-            saveKernelToFile("output/wproj_%f_interpolated_%d.csv", w, textureSupport, interpolated);
+            saveKernelToFile("output/wproj_%f_after_interpolated_%d.csv", w, textureSupport, interpolated);
+        
+        // Normalize the kernel
+        normalizeKernel(interpolated, textureSupport, wFullSupport);
+        
+        if(iw == plane)
+            saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, textureSupport, interpolated);
         
         // Bind interpolated kernel to texture matrix
         for(int y = 0; y < textureSupport; y++)
@@ -814,6 +937,17 @@ void createWProjectionPlanes(FloatComplex *wTextures)
     free(shift);
 }
 
+/*
+ * Function: createScaledSpheroidal 
+ * --------------------
+ * Creates a zero padded Prolate Spheroidal curve of wFullSupport width
+ * 
+ * spheroidal : the block of memory for storing the padded prolate spheroidal
+ * wFullSupport : the width of the desired prolate spheroidal curve
+ * convHalf : half the width of the number of elements in spheroidal
+ * 
+ * returns: nothing
+ */
 void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf)
 {
     int wHalfSupport = wFullSupport/2;
@@ -823,18 +957,10 @@ void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf)
     for(int i = 0; i < wFullSupport; i++)
     {
         nu[i] = fabs(calcSpheroidalShift(i, wFullSupport));
-//        printf("%f\n", nu[i]);
     }
-//    printf("\n\n");
         
     // Calculate curve from steps
     calcSpheroidalCurve(nu, tempSpheroidal, wFullSupport);
-    
-    // Zero out first weight
-    tempSpheroidal[0] = 0.0;
-    // Zero out last weight to balance spheroidal
-    if(wFullSupport % 2 != 0)
-        tempSpheroidal[wFullSupport-1] = 0.0;
     
     // Bind weights to middle
     for(int i = convHalf-wHalfSupport; i <= convHalf+wHalfSupport; i++)
@@ -844,6 +970,20 @@ void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf)
     free(nu);
 }
 
+/*
+ * Function: createPhaseScreen 
+ * --------------------
+ * Creates a phase screen dependant on the width/height of the scalarSupport
+ * 
+ * convSize : the full width/height of screen
+ * screen : the memory block used for storing the calculated phase screen
+ * spheroidal : the zero padded Prolate Spheroidal
+ * w : the w term used to modify the phase of the screen
+ * fieldOfView : the field of view required for the phase screen
+ * scalarSupport : the full support required for the specified w term
+ * 
+ * returns: nothing
+ */
 void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, double w, double fieldOfView, int scalarSupport)
 {        
     int convHalf = convSize/2;
@@ -876,8 +1016,6 @@ void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, 
             
             if(rsq == 0.0)
                 screen[index] = (DoubleComplex) {.real = 1.0, .imaginary = 0.0};
-            
-            // Note: what happens when W = 0?
                 
             screen[index].real *= taper;
             screen[index].imaginary *= taper;
@@ -885,6 +1023,18 @@ void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, 
     }
 }
 
+/*
+ * Function: inverseFFT2dVectorRadixTransform 
+ * --------------------
+ * Performs an inverse FFT of the input memory block and stores it in 
+ * the output memory block
+ *  
+ * numChannels : the number of channels to perform an iFFT on
+ * input : the source data for performing an iFFT
+ * output : the destination memory for the resulting iFFT
+ * 
+ * returns: nothing
+ */
 void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, DoubleComplex *output)
 {   
     // Calculate bit reversed indices
@@ -949,6 +1099,16 @@ void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, Dou
         }
 }
 
+/*
+ * Function: calcBitReversedIndices 
+ * --------------------
+ * Calculates an array of bit reversed indices for use within the iFFT
+ *  
+ * n : the number of indices for which to bit reverse
+ * indices : the resulting bit reversed indices
+ * 
+ * returns: nothing
+ */
 void calcBitReversedIndices(int n, int* indices)
 {   
     for(int i = 0; i < n; i++)
@@ -966,6 +1126,18 @@ void calcBitReversedIndices(int n, int* indices)
     }
 }
 
+/*
+ * Function: calcSpheroidalCurve 
+ * --------------------
+ * Calculates a Prolate Spheroidal curve by approximation
+ * (the Fred Schwab PS approximation technique)
+ * 
+ * nu : the input weights of the PS for transformation
+ * curve : the memory block for storing the calculated PS
+ * width : the width of the PS curve to produce
+ * 
+ * returns: nothing
+ */
 void calcSpheroidalCurve(double *nu, double *curve, int width)
 {   
     double p[2][5] = {{8.203343e-2, -3.644705e-1, 6.278660e-1, -5.335581e-1, 2.312756e-1},
@@ -1027,6 +1199,17 @@ void calcSpheroidalCurve(double *nu, double *curve, int width)
     free(part);
 }
 
+/*
+ * Function: fft2dShift 
+ * --------------------
+ * Performs a shift of data for use within an FFT/iFFT
+ * 
+ * n : the width/height of the input and shifted memory blocks
+ * input : the data for which to shift
+ * shifted : the memory block for storing the shifted data
+ * 
+ * returns: nothing
+ */
 void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted)
 {
     int r = 0, c = 0;
@@ -1050,6 +1233,19 @@ void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted)
     }
 }
 
+/*
+ * Function: interpolateCubicWeight 
+ * --------------------
+ * Performs a bicubic interpolation on 4 supplied points
+ * 
+ * points : the 4 points to interpolate against
+ * newPoint : the new point produced by the bicubic interpolation
+ * start : the starting index of the 4 neighbours to use in the interpolation
+ * width : the width of the original block of memory being interpolated from
+ * horizontal : a flag to determine if performing a vertical or horizontal interpolation
+ * 
+ * returns: the newly interpolated weight
+ */
 InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, InterpolationPoint newPoint, int start, int width, bool horizontal)
 {      
     double shiftCubed = pow(getShift(width), 3);
@@ -1069,7 +1265,6 @@ InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, Interpolat
     DoubleComplex w3 = (DoubleComplex) {.real = points[start+3].weight.real / (6.0 * shiftCubed), 
             .imaginary = points[start+3].weight.imaginary / (6.0 * shiftCubed)}; 
     
-    // Refactor for complex multiplication and subtraction
     DoubleComplex t0 = complexMultiply(complexMultiply(complexMultiply(w0, complexSubtract(interpShift, p1)), complexSubtract(interpShift, p2)), 
             complexSubtract(interpShift, p3));
     DoubleComplex t1 = complexMultiply(complexMultiply(complexMultiply(w1, complexSubtract(interpShift, p0)), complexSubtract(interpShift, p2)), 
@@ -1078,33 +1273,46 @@ InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, Interpolat
             complexSubtract(interpShift, p3));
     DoubleComplex t3 = complexMultiply(complexMultiply(complexMultiply(w3, complexSubtract(interpShift, p0)), complexSubtract(interpShift, p1)), 
             complexSubtract(interpShift, p2));
-    // Refactor for complex addition
+    
     newPoint.weight = complexAdd(complexAdd(complexAdd(t0, t1), t2), t3);
     return newPoint;
 }
 
-void getBicubicNeighbours(int x, int y, InterpolationPoint *neighbours, int origFullSupport, int interpFullSupport, DoubleComplex* matrix)
+/*
+ * Function: getBicubicNeighbours 
+ * --------------------
+ * Calculates and stores the 16 elements required to perform a series of bicubic interpolation against
+ * 
+ * xShift : the x shift position to begin selecting neighbours from (-1.0 to 1.0 inclusive)
+ * yShift : the y shift position to begin selecting neighbours from (-1.0 to 1.0 inclusive)
+ * neighbours : the memory block for storing the 16 weights located
+ * resolutionSupport : the full support of the convolution kernel being used for interpolation
+ * matrix : the convolution kernel  
+ * 
+ * returns: nothing
+ */
+void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighbours, int resolutionSupport, DoubleComplex* matrix)
 {
-    // Transform x, y into scaled shift
-    float shiftX = calcInterpolateShift(x+1, interpFullSupport, -0.5);
-    float shiftY = calcInterpolateShift(y+1, interpFullSupport, -0.5);
-//    printf("Populating element at Row: %d and Col: %d\n", y, x);
-//    printf("Row Shift: %f, Col Shift: %f\n", shiftY, shiftX);
     // Get x, y from scaled shift 
-    int scaledPosX = calcPosition(shiftX, origFullSupport)-1;
-    int scaledPosY = calcPosition(shiftY, origFullSupport)-1;
-//     printf("X: %d, Y: %d\n", scaledPosX, scaledPosY);
-    // Get 16 nInterpolationPointeighbours
+    int scaledPosX = calcPosition(xShift, resolutionSupport);
+    int scaledPosY = calcPosition(yShift, resolutionSupport);
+
+    // Get 16 neighbours
     for(int r = scaledPosY - 1, i = 0; r < scaledPosY + 3; r++)
     {
         for(int c = scaledPosX - 1; c < scaledPosX + 3; c++)
         {
-            InterpolationPoint n = (InterpolationPoint) {.xShift = calcShift(c, origFullSupport, -1.0), .yShift = calcShift(r, origFullSupport, -1.0)};
+            InterpolationPoint n = (InterpolationPoint) {.xShift = calcInterpolateShift(c-1, resolutionSupport-2),
+                .yShift = calcInterpolateShift(r-1, resolutionSupport-2)};
             
-            if(c < 0 || c > origFullSupport || r < 0 || r > origFullSupport)
-                n.weight = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};
+            if(c < 1 || c >= resolutionSupport || r < 1 || r >= resolutionSupport)
+            {
+                n.weight = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};   
+            }
             else
-                n.weight = matrix[r * origFullSupport + c];
+            {
+                n.weight = matrix[r * resolutionSupport + c];
+            }
             
             neighbours[i++] = n;
         }
@@ -1121,14 +1329,14 @@ float calcSpheroidalShift(int index, int width)
         return -1.0 + index * getShift(width-1);
 }
 
-float calcInterpolateShift(int index, int width, float start)
+float calcInterpolateShift(float index, float width)
 {
-    return start + ((float)index/(float)width);
+    return -1.0 + (index * (2.0 / width));
 }
 
 float calcShift(int index, int width, float start)
 {
-    return start + index * getShift(width);
+    return start + (index * getShift(width));
 }
 
 double getShift(double width)
@@ -1143,7 +1351,8 @@ float getStartShift(float width)
 
 int calcPosition(float x, int scalerWidth)
 {
-    return (int) floor(((x+1.0f)/2.0f) * (scalerWidth));
+    int offset = (x < 0.0) ? 1 : 2;
+    return ((int) floor(((x+1.0f)/2.0f) * (scalerWidth-offset)))+1;
 }
 
 void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data)
@@ -1162,3 +1371,133 @@ void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data)
     fclose(file);
     printf("FILE SAVED\n");
 }
+
+void saveGridToFile(int support)
+{    
+    int saveSupport = config.gridDimension;             // 512
+    int saveRowMin = (support/2)-(saveSupport/2);       // 9000 - 256
+    int saveRowMax = (support/2)+(saveSupport/2);       // 9000 + 256
+    int saveColMin = (support*4/2)-(saveSupport*4/2);
+    int saveColMax = (support*4/2)+(saveSupport*4/2);
+    
+    // Save to file (real portion)
+    FILE *file_real = fopen("output/grid_real.csv", "w");
+    FILE *file_imag = fopen("output/grid_imag.csv", "w");
+    FILE *file_weight = fopen("output/grid_weight.csv", "w");
+    for(int r = saveRowMin; r < saveRowMax; r++)
+    {
+        for(int c = saveColMin; c < saveColMax; c+=4)
+        {   fprintf(file_weight, "%+f, ", gridBuffer[(r*(int)config.gridDimension*4)+c]);
+            fprintf(file_real, "%+f, ", gridBuffer[(r*(int)config.gridDimension*4)+c+1]);
+            fprintf(file_imag, "%+f, ", gridBuffer[(r*(int)config.gridDimension*4)+c+2]);
+        }
+        fprintf(file_real, "\n");
+        fprintf(file_imag, "\n");
+        fprintf(file_weight, "\n");
+    }
+    fclose(file_real);
+    fclose(file_imag);
+    fclose(file_weight);
+    printf("Grid has been output to file\n");
+}
+
+void loadGridFromFile(GLfloat *grid, int gridDimension)
+{
+    printf(">>> Reading input grid\n");
+    
+    FILE *realFile = fopen(config.inputGridComparisonReal, "r");
+    FILE *imagFile = fopen(config.inputGridComparisonImag, "r");
+    int index = 0;
+    float real = 0.0, imaginary = 0.0;
+    float rMin = 100000.0, rMax = 0.0, iMin = 100000.0, iMax = 0.0;
+    
+    for(int r = 0; r < gridDimension; r++)
+    {
+        for(int c = 0; c < gridDimension * 4; c+=4)
+        {
+            index = (r * gridDimension * 4) + c;
+            fscanf(realFile, "%f, ", &real);
+            fscanf(imagFile, "%f, ", &imaginary);
+            grid[index+1] = real;
+            grid[index+2] = imaginary;
+            
+            if(real < rMin)
+                rMin = real;
+            if(real > rMax)
+                rMax = real;
+
+            if(imaginary < iMin)
+                iMin = imaginary;
+            if(imaginary > iMax)
+                iMax = imaginary;
+        }
+    }
+    
+    printf("rMin: %f, rMax: %f, iMin: %f, iMax: %f\n", rMin, rMax, iMin, iMax);
+    
+    fclose(realFile);
+    fclose(imagFile);
+     
+    printf(">>> Reading input grid - COMPLETE\n");
+}
+
+void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension)
+{
+    printf(">>> Comparing grids\n");
+    
+    int counter = 0, index = 0;
+    float sum = 0.0, maxDistance = 0.0, rDiff = 0.0, iDiff = 0.0, distance = 0.0;
+    float rMin = 100000.0, rMax = 0.0, iMin = 100000.0, iMax = 0.0;
+    float realSumHEC = 0.0, imagSumHEC = 0.0, realSumNAG = 0.0, imagSumNAG = 0.0;
+    
+    for(int r = 0; r < gridDimension; r++)
+    {
+        for(int c = 0; c < gridDimension*4; c+=4)
+        {
+            index = (r * gridDimension * 4) + c;
+            
+            // Accumulate sums
+            realSumHEC += gridA[index+1];
+            imagSumHEC += gridA[index+2];
+            realSumNAG += gridB[index+1];
+            imagSumNAG += gridB[index+2];
+            
+            if(gridA[index+1] < rMin)
+                rMin = gridA[index+1];
+            if(gridA[index+1] > rMax)
+                rMax = gridA[index+1];
+
+            if(gridA[index+2] < iMin)
+                iMin = gridA[index+2];
+            if(gridA[index+2] > iMax)
+                iMax = gridA[index+2];
+            
+            
+            if((fabs(gridA[index+1]) + fabs(gridA[index+2])) > 0.0)
+            {
+                rDiff = gridA[index+1] - gridB[index+1];
+                iDiff = gridA[index+2] - gridB[index+2];
+                
+                distance = (rDiff * rDiff) + (iDiff * iDiff);
+                
+                if(distance > maxDistance)
+                    maxDistance = distance;
+                
+                sum += distance;
+                counter++;
+            }
+        }
+    }
+ 
+    printf("rMin: %f, rMax: %f, iMin: %f, iMax: %f\n", rMin, rMax, iMin, iMax);
+    printf("Sum: %f, Counter: %d, Max Distance: %f\n", sum, counter, maxDistance);
+    printf("Sum of difference (visibilities): %f\n", sum / config.visibilityCount);
+    sum /= counter;
+    printf("Sum of difference: %f\n\n", sum);
+    printf("HEC Real: %f, HEC Imag: %f\n", realSumHEC, imagSumHEC);
+    printf("NAG Real: %f, NAG Imag: %f\n", realSumNAG, imagSumNAG);
+    printf("Diff Real: %f, Diff Imag: %f\n\n", fabsf(realSumHEC-realSumNAG), fabsf(imagSumHEC-imagSumNAG));
+    
+    printf(">>> Comparing grids - COMPLETE\n");
+}
+
