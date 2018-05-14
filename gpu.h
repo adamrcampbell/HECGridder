@@ -1,9 +1,9 @@
 
 /*
  * 
- * Authors: Dr Seth Hall, Dr Andrew Ensor, Adam Campbell
+ * Authors: Seth Hall, Andrew Ensor, Adam Campbell
  * Auckland University of Technology - AUT
- * High Performance Computing (HPC) Laboratory
+ * High Performance Laboratory
  * 
  */
 
@@ -100,6 +100,24 @@
  * >>> B: Visibility imag complex multiplication with looked up kernel element
  * >>> A: Texture imaginary weight (kernel weight)
  */
+#define FRAGMENT_SHADER_RADIAL " \
+  #version 430\n \
+  precision highp float; \
+  uniform sampler2D kernalTex;\
+  in vec2 fComplex; \
+  in float wPlane; \
+  in float conjugate; \
+  void main() { \
+    vec2 coord = 2.0*gl_PointCoord.xy - 1.0;\
+    coord *= coord;\
+    float radialLookup = clamp(sqrt(coord.x+coord.y),0.0,1.0); \
+    vec2 kernelLookup = texture(kernalTex,vec2(radialLookup,wPlane)).rg; \
+    kernelLookup.g = kernelLookup.g * conjugate;\
+    gl_FragColor.ra = kernelLookup.rg; \
+    gl_FragColor.gb = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
+                                kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
+  }"
+
 #define FRAGMENT_SHADER " \
   #version 430\n \
   precision highp float; \
@@ -115,6 +133,9 @@
                                  kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
   }"
 
+
+//    gl_FragColor.ra = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
+//                                 kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
 // Performs rendering to screen (not gridding)
 #define FRAGMENT_SHADER_RENDER " \
   #version 430\n \
@@ -136,4 +157,5 @@
   }"
 
 #endif /* GPU_H */
+
 

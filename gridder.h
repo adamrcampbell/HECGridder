@@ -1,9 +1,9 @@
 
 /*
  * 
- * Authors: Dr Seth Hall, Dr Andrew Ensor, Adam Campbell
+ * Authors: Seth Hall, Andrew Ensor, Adam Campbell
  * Auckland University of Technology - AUT
- * High Performance Computing (HPC) Laboratory
+ * High Performance Laboratory
  * 
  */
 
@@ -27,6 +27,7 @@ typedef struct Config {
     bool offsetVisibilities;
     bool compareToOxfordGrid;
     bool useHeavyInterpolation;
+    bool useRadial;
 
     // GUI
     unsigned int refreshDelay;
@@ -102,6 +103,7 @@ void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighb
 InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, InterpolationPoint newPoint, int start, int width, bool horizontal);
 void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf);
 void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data);
+void saveRadialKernelsToFile(char* filename, int support, int wPlanes, FloatComplex* data);
 float calcSpheroidalShift(int index, int width);
 int calcPosition(float x, int scalerWidth);
 float calcShift(int index, int width, float start);
@@ -113,6 +115,8 @@ DoubleComplex complexConjugateExp(double ph);
 
 void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension);
 void loadGridFromFile(GLfloat *grid, int gridDimension);
+void generateHistogramFile(GLfloat *gridA, GLfloat *gridB, int width);
 
 #endif /* GRIDDER_H */
+
 
