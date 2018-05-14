@@ -1,7 +1,7 @@
 
 /*
  * 
- * Authors: Seth Hall, Andrew Ensor, Adam Campbell
+ * Authors: Dr. Seth Hall, Dr. Andrew Ensor, Adam Campbell
  * Auckland University of Technology - AUT
  * High Performance Laboratory
  * 

@@ -1,7 +1,7 @@
 
 /*
  * 
- * Authors: Seth Hall, Andrew Ensor, Adam Campbell
+ * Authors: Dr. Seth Hall, Dr. Andrew Ensor, Adam Campbell
  * Auckland University of Technology - AUT
  * High Performance Laboratory
  * 
@@ -160,7 +160,7 @@ void initConfig(void)
     // Note: slows down gridding a batch of visibilities, but improves precision
     config.useHeavyInterpolation = true;
     
-    //used to enable radial Texturing (2D kernels) or Cube texturing (3D)
+    // used to enable radial Texturing (2D kernels) or Cube texturing (3D)
     config.useRadial = false;
     
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
@@ -926,8 +926,6 @@ void createWProjectionPlanes(FloatComplex *wTextures)
     DoubleComplex *screen = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
     // Create w screen
     DoubleComplex *shift = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
-    // Single dimension spheroidal
-    double *spheroidal = calloc(convolutionSize, sizeof(double));
     
      // Test variable to output W plane creation steps
     // (phase screen, after fft, interpolated, normalized)
@@ -942,11 +940,8 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         printf("Creating W Plane: (%d) For w = %f, field of view = %f, " \
                 "fresnel number = %f, full w support: %d texSupport : %d\n", iw, w, config.fieldOfView, fresnel, wFullSupport, textureSupport);
         
-        // Calculate Prolate Spheroidal
-        createScaledSpheroidal(spheroidal, wFullSupport, convHalf);
-        
         // Create Phase Screen
-        createPhaseScreen(convolutionSize, screen, spheroidal, w, fov, wFullSupport);
+        createPhaseScreen(convolutionSize, screen, w, fov, wFullSupport);
         
         if(iw == plane)
             saveKernelToFile("output/wproj_%f_phase_screen_%d.csv", w, convolutionSize, screen);
@@ -1008,63 +1003,19 @@ void createWProjectionPlanes(FloatComplex *wTextures)
                 
             }  
         } 
+         
         free(interpolated);
         memset(screen, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
         memset(shift, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
     }
+    
     if(config.useRadial && plane >= 0)
     {
         saveRadialKernelsToFile("output/wproj_%d_radial_%d.csv",convHalf,numWPlanes,wTextures);
     }
-    free(spheroidal);
+    
     free(screen);
     free(shift);
-}
-
-/*
- * Function: createScaledSpheroidal 
- * --------------------
- * Creates a zero padded Prolate Spheroidal curve of wFullSupport width
- * 
- * spheroidal : the block of memory for storing the padded prolate spheroidal
- * wFullSupport : the width of the desired prolate spheroidal curve
- * convHalf : half the width of the number of elements in spheroidal
- * 
- * returns: nothing
- */
-void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf)
-{
-    int wHalfSupport = wFullSupport/2;
-    int paddedWFullSupp = wFullSupport+2;
-    double *nu = calloc(paddedWFullSupp, sizeof(double));
-    double *tempSpheroidal = calloc(paddedWFullSupp, sizeof(double));
-    // Calculate steps
-    for(int i = 0; i < paddedWFullSupp; i++)
-        nu[i] = fabs(calcSpheroidalShift(i, paddedWFullSupp));
-        
-    // Calculate curve from steps
-    calcSpheroidalCurve(nu, tempSpheroidal, paddedWFullSupp);
-    
-//    printf(">>> Printing Spheroidal\n");
-//    for(int i = 0; i < paddedWFullSupp; i++)
-//        printf("%f\n", tempSpheroidal[i]);
-//    printf(">>> Done\n");
-    
-    // Antialiasing?
-    for(int i = 0; i < paddedWFullSupp; i++)
-        tempSpheroidal[i] *= (1.0 - pow(nu[i], 2.0));
-    
-//    printf(">>> Printing Spheroidal\n");
-//    for(int i = 0; i < paddedWFullSupp; i++)
-//        printf("%f\n", tempSpheroidal[i]);
-//    printf(">>> Done\n");   
-    
-    // Bind weights to middle
-    for(int i = convHalf-wHalfSupport; i <= convHalf+wHalfSupport; i++)
-        spheroidal[i] = tempSpheroidal[i-(convHalf-wHalfSupport)+1];    
-    
-    free(tempSpheroidal);
-    free(nu);
 }
 
 /*
@@ -1081,29 +1032,41 @@ void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf)
  * 
  * returns: nothing
  */
-void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, double w, double fieldOfView, int scalarSupport)
+void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double w, double fieldOfView, int wFullSupport)
 {        
-    int convHalf = convSize/2;
-    int scalarHalf = scalarSupport/2;
+    int resolutionHalfSupport = resolutionFullSupport/2;
+    int paddedWFullSupport = wFullSupport+2;
+    int paddedWHalfSupport = paddedWFullSupport/2;
     int index = 0;
-    double taper, taperY;
-    double l, m;
-    double lsq, rsq;
-    double phase;
+    double taper, taperY, nuX, nuY, radius;
+    double l, m, lsq, rsq, phase;
     
-    for(int iy = 0; iy < scalarSupport; iy++)
+    for(int iy = 0; iy < paddedWFullSupport; iy++)
     {
-        l = (((double) iy-(scalarHalf)) / (double) scalarSupport) * fieldOfView;
+        l = (((double) iy-(paddedWHalfSupport)) / (double) wFullSupport) * fieldOfView;
         lsq = l*l;
-        taperY = spheroidal[iy+(convHalf-scalarHalf)];
         phase = 0.0;
         
-        for(int ix = 0; ix < scalarSupport; ix++)
+        nuY = fabs(calcSpheroidalShift(iy, paddedWFullSupport)); 
+        if(!config.useRadial)
+            taperY = calcSpheroidalWeight(nuY) * (1.0 - nuY * nuY);
+        
+        for(int ix = 0; ix < paddedWFullSupport; ix++)
         {
-            m = (((double) ix-(scalarHalf)) / (double) scalarSupport) * fieldOfView;
+            m = (((double) ix-(paddedWHalfSupport)) / (double) wFullSupport) * fieldOfView;
             rsq = lsq+(m*m);
-            taper = taperY * spheroidal[ix+(convHalf-scalarHalf)];
-            index = (iy+(convHalf-scalarHalf)) * convSize + (ix+(convHalf-scalarHalf));
+            index = (iy+(resolutionHalfSupport-paddedWHalfSupport)) * resolutionFullSupport
+                    + (ix+(resolutionHalfSupport-paddedWHalfSupport));
+
+            nuX = fabs(calcSpheroidalShift(ix, paddedWFullSupport));
+            
+            if(config.useRadial)
+            {
+                radius = sqrt(nuX * nuX + nuY * nuY);
+                taper = calcSpheroidalWeight(radius) * (1.0 - radius * radius);
+            }
+            else
+                taper = taperY * calcSpheroidalWeight(nuX) * (1.0 - nuX * nuX);
             
             if(rsq < 1.0)
             {
@@ -1224,7 +1187,7 @@ void calcBitReversedIndices(int n, int* indices)
 }
 
 /*
- * Function: calcSpheroidalCurve 
+ * Function: calcSpheroidalWeight 
  * --------------------
  * Calculates a Prolate Spheroidal curve by approximation
  * (the Fred Schwab PS approximation technique)
@@ -1235,65 +1198,40 @@ void calcBitReversedIndices(int n, int* indices)
  * 
  * returns: nothing
  */
-void calcSpheroidalCurve(double *nu, double *curve, int width)
+double calcSpheroidalWeight(double nu)
 {   
-    double p[2][5] = {{8.203343e-2, -3.644705e-1, 6.278660e-1, -5.335581e-1, 2.312756e-1},
-                     {4.028559e-3, -3.697768e-2, 1.021332e-1, -1.201436e-1, 6.412774e-2}};
-    double q[2][3] = {{1.0000000e0, 8.212018e-1, 2.078043e-1},
-                     {1.0000000e0, 9.599102e-1, 2.918724e-1}};
+    static double p[] = {0.08203343, -0.3644705, 0.627866, -0.5335581, 0.2312756,
+        0.004028559, -0.03697768, 0.1021332, -0.1201436, 0.06412774};
+    static double q[] = {1.0, 0.8212018, 0.2078043,
+        1.0, 0.9599102, 0.2918724};
     
-    int pNum = 5;
-    int qNum = 3;
+    int part, sp, sq;
+    double nuend, delta, top, bottom;
     
-    int *part = calloc(width, sizeof(int));
-    double *nuend = calloc(width, sizeof(double));
-    double *delnusq = calloc(width, sizeof(double));
-    double *top = calloc(width, sizeof(double));
-    double *bottom = calloc(width, sizeof(double));
-    
-    for(int i = 0; i < width; i++)
+    if(nu >= 0.0 && nu < 0.75)
     {
-        if(nu[i] >= 0.0 && nu[i] <= 0.75)
-            part[i] = 0;
-        if(nu[i] > 0.75 && nu[i] < 1.0)
-            part[i] = 1;
-        
-        if(nu[i] >= 0.0 && nu[i] <= 0.75)
-            nuend[i] = 0.75;
-        if(nu[i] > 0.75 && nu[i] < 1.0)
-            nuend[i] = 1.0;
-        
-        delnusq[i] = (nu[i] * nu[i]) - (nuend[i] * nuend[i]);
+        part = 0;   
+        nuend = 0.75;
     }
-    
-    for(int i = 0; i < width; i++)
+    else if(nu >= 0.75 && nu <= 1.0)
     {
-        top[i] = p[part[i]][0];
-        bottom[i] = q[part[i]][0];
+        part = 1;
+        nuend = 1.0;
     }
+    else
+        return 0.0;
+
+    delta = nu * nu - nuend * nuend;
+    sp = part * 5;
+    sq = part * 3;
+    top = p[sp];
+    bottom = q[sq];
     
-    for(int i = 1; i < pNum; i++)
-        for(int y = 0; y < width; y++)
-            top[y] += (p[part[y]][i] * pow(delnusq[y], i)); 
-    
-    for(int i = 1; i < qNum; i++)
-        for(int y = 0; y < width; y++)
-            bottom[y] += (q[part[y]][i] * pow(delnusq[y], i));
-    
-    for(int i = 0; i < width; i++)
-    {   
-        if(bottom[i] > 0.0)
-            curve[i] = top[i] / bottom[i];
-        if(fabs(nu[i]) > 1.0)
-            curve[i] = 0.0;
-        
-    }
-    
-    free(bottom);
-    free(top);
-    free(delnusq);
-    free(nuend);
-    free(part);
+    for(int i = 1; i < 5; i++)
+        top += p[sp+i] * pow(delta, i);
+    for(int i = 1; i < 3; i++)
+        bottom += q[sq+i] * pow(delta, i);
+    return (bottom == 0.0) ? 0.0 : top/bottom;
 }
 
 /*
@@ -1418,12 +1356,7 @@ void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighb
 
 float calcSpheroidalShift(int index, int width)
 {   
-    // Even
-    if(width % 2 == 0)
-        return -1.0 + index * getShift(width);
-    // Odd
-    else
-        return -1.0 + index * getShift(width-1);
+    return -1.0 + index * getShift(width-1);
 }
 
 float calcInterpolateShift(float index, float width)

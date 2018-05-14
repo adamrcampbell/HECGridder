@@ -1,7 +1,7 @@
 
 /*
  * 
- * Authors: Seth Hall, Andrew Ensor, Adam Campbell
+ * Authors: Dr. Seth Hall, Dr. Andrew Ensor, Adam Campbell
  * Auckland University of Technology - AUT
  * High Performance Laboratory
  * 
@@ -91,8 +91,8 @@ void saveGridToFile(int support);
 void loadVisibilitySamples(void);
 void compareToIdealGrid(void);
 void createWProjectionPlanes(FloatComplex *wTextures);
-void createPhaseScreen(int convSize, DoubleComplex *screen, double* spheroidal, double w, double fieldOfView, int scalarSupport);
-void calcSpheroidalCurve(double *nu, double *curve, int width);
+void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double w, double fieldOfView, int wFullSupport);
+double calcSpheroidalWeight(double nu);
 void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, DoubleComplex *output);
 void calcBitReversedIndices(int n, int* indices);
 void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted);
@@ -101,7 +101,6 @@ float calcInterpolateShift(float index, float width);
 double getShift(double width);
 void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighbours, int resolutionSupport, DoubleComplex* matrix);
 InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, InterpolationPoint newPoint, int start, int width, bool horizontal);
-void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf);
 void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data);
 void saveRadialKernelsToFile(char* filename, int support, int wPlanes, FloatComplex* data);
 float calcSpheroidalShift(int index, int width);
