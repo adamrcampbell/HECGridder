@@ -85,7 +85,9 @@ static GLuint uNumPlanes;
 static GLuint fboID;
 static GLuint textureID;
 static GLuint kernalTextureID;
+static GLuint textureID;
 static GLfloat* gridBuffer;
+static GLenum KERNEL_DIM;
 static FloatComplex* kernelBuffer;
 static GLuint* visibilityIndices;
 static GLfloat* visibilities;
@@ -109,6 +111,11 @@ int windowDisplay;
 // Global gridder configuration
 Config config;
 
+
+//CHANGES: - numWPlanes set to 5, gridDimension set to 100, changed texture to a 2D
+//altered GPU.h fragment shader to allow Radial including use of Sampler2D, testing 1 visibility only
+//kernel function now calling new test routine where calloc is called
+
 void initConfig(void) 
 {
     // Scale grid dimension down for GUI rendering
@@ -116,7 +123,7 @@ void initConfig(void)
     
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
-    // slower rendering to the grid in GPU
+    // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
     config.kernelTexSize = 128;
     
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
@@ -153,6 +160,9 @@ void initConfig(void)
     // Note: slows down gridding a batch of visibilities, but improves precision
     config.useHeavyInterpolation = true;
     
+    //used to enable radial Texturing (2D kernels) or Cube texturing (3D)
+    config.useRadial = false;
+    
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
     config.numVisibilityParams = 6;
     
@@ -162,7 +172,7 @@ void initConfig(void)
     // variable used to control when the Gridder will exit after reaching the dump count, 
     // use a negative value to keep "infinite" gridding. 
     // Note: number of actual iterations is terminationDumpCount * displayDumpTime assuming dumpCount positive
-    teminationDumpCount = 1;
+    teminationDumpCount = -1;
     
     // Flag if want to compare HEC gridder output to Oxford gridder output (ensure file input locations are defined)
     // Note: only compares on first iteration, remainder are just processed for timing output and GUI rendering.
@@ -202,7 +212,7 @@ void initConfig(void)
     config.wScale = pow((double) config.wProjectNumPlanes, 2.0) / config.wProjectionMaxW;
     
     // Field of view for observation (relies on original grid dimension)
-    config.fieldOfView = config.cellSizeRad * (double) config.gridDimension;
+    config.fieldOfView =  config.cellSizeRad * (double) config.gridDimension;
     
     // Custom variable for scaling the UVScale (used for testing, zooms the GUI rendered visibilities)
     config.graphicMultiplier = 1.0f;
@@ -307,7 +317,12 @@ void initGridder(void)
     else
         vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER_SNAP);
     
-    GLuint fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+    GLuint fragmentShader;
+    if(config.useRadial)
+        fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_RADIAL);
+    else
+        fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+    
     sProgram = createProgram(vertexShader, fragmentShader);
     sLocPosition = glGetAttribLocation(sProgram, "position");
     sComplex = glGetAttribLocation(sProgram, "complex");
@@ -352,32 +367,73 @@ void initGridder(void)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     
-    kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * config.wProjectNumPlanes, sizeof(FloatComplex));
-    createWProjectionPlanes(kernelBuffer);
+    if(config.useRadial)
+    {   printf("RADIAL MODE SET, KERNELTEX SIZE should be HALF OF RESOLUTION FOR BEST RESULTS ");
+        config.kernelTexSize = config.kernelResolutionSize/2;
+        kernelBuffer = calloc(config.kernelTexSize* config.wProjectNumPlanes, sizeof(FloatComplex));
+        createWProjectionPlanes(kernelBuffer);
+        //createRadialPlanesTest(kernelBuffer, config.kernelTexSize, config.wProjectNumPlanes);
+        KERNEL_DIM = GL_TEXTURE_2D;
+    }
+    else
+    {    kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * config.wProjectNumPlanes, sizeof(FloatComplex));
+         createWProjectionPlanes(kernelBuffer);
+         KERNEL_DIM = GL_TEXTURE_3D;
+    }
+    
     
     //kernal TEXTURE
     kernalTextureID = idArray[1];
-    glBindTexture(GL_TEXTURE_3D, kernalTextureID);
-    glTexParameterf(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameterf(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    glEnable(GL_TEXTURE_3D);
-    // width, height, depth
-    glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize, config.kernelTexSize, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
-    glBindTexture(GL_TEXTURE_3D, 0);
+    glBindTexture(KERNEL_DIM, kernalTextureID);
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if(!config.useRadial)
+        glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glEnable(KERNEL_DIM);
+    // width, height, 
+    if(config.useRadial)
+        glTexImage2D(GL_TEXTURE_2D, 0,  GL_RG32F, config.kernelTexSize, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
+    else
+        glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize, config.kernelTexSize, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
+
+    glBindTexture(KERNEL_DIM, 0);
     
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
     glEnable(GL_POINT_SPRITE);
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
     
     setShaderUniforms();
-    
+    glFlush();
+    glFinish();
     counter = 0;
     sumTimeProcess = 0.0f;
     gettimeofday(&timeCallsReal, 0);
     timeCallsProcess = clock();
+    
+    printf("SEEMS LIKE ITS ALL SET UP FINE??? \n");
+}
+
+void createRadialPlanesTest(FloatComplex *kernel,int totalWidth, int totalHeight)
+{
+    float inc = 1.0f/(float)totalWidth;
+    float inc2 = 1.0f/(float)totalHeight;
+    
+    for(int r = 0; r < totalHeight; r++)
+    {   int c = 0;
+        for(int c = 0; c < totalWidth-1; c++)
+        {
+            kernel[r * totalWidth + c].real = 1.0f - c*inc;   
+            kernel[r * totalWidth + c].imaginary = 1.0 - r*inc2;
+            if(r == 0) 
+                printf("(%.3f, %d) ",  kernel[r * totalWidth + c].real, r * totalWidth + c);
+        }
+        //ensure last value is always 0 for radial values > 1 (ensures Clamps to 0)
+        kernel[r * totalWidth + c].real = 0.0f;
+        kernel[r * totalWidth + c].imaginary = 0.0f;
+        //printf("\n");
+    }
 }
 
 /*
@@ -428,11 +484,11 @@ void runGridder(void) {
         
         for (int i = 0; i < config.visibilityCount * config.numVisibilityParams; i += config.numVisibilityParams) {
             // U, V, W, Real, Imaginary, Weight
-            visibilities[i] =  0.0 * scale;
-            visibilities[i + 1] = 0.0 * scale;
-            visibilities[i + 2] = 0.0 * scale;
+            visibilities[i] =  0.0;// * scale;
+            visibilities[i + 1] = 0.0;// * scale;
+            visibilities[i + 2] = 7041.0f; //* scale;
             visibilities[i + 3] = 1.0;
-            visibilities[i + 4] = 0.0;
+            visibilities[i + 4] = 1.0;
             visibilities[i + 5] = 1.0f;
         }
     }
@@ -444,11 +500,10 @@ void runGridder(void) {
     struct timeval timeFunctionReal;
     gettimeofday(&timeFunctionReal, 0);
     int timeFunctionProcess = clock();
-
     glUseProgram(sProgram);
     glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
     glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
-    glBindTexture(GL_TEXTURE_3D, kernalTextureID);
+    glBindTexture(KERNEL_DIM, kernalTextureID);
     glUniform1i(uShaderTextureKernalHandle, 0);
     glBindBuffer(GL_ARRAY_BUFFER, visibilityBuffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount, visibilities, GL_STATIC_DRAW);
@@ -477,7 +532,7 @@ void runGridder(void) {
     glDisableVertexAttribArray(sComplex);
     glDisableVertexAttribArray(sLocPosition);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindTexture(GL_TEXTURE_3D, 0);
+    glBindTexture(KERNEL_DIM, 0);
     glUseProgram(0);
     
     glDisable(GL_BLEND);
@@ -519,7 +574,7 @@ void runGridder(void) {
         
         // This function can be used if you wish to save the gridder results to file
         // Saves convolutional weights, grid real, and grid imaginary
-        //saveGridToFile(config.gridDimension);
+       // saveGridToFile(config.gridDimension);
         
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -540,6 +595,7 @@ void runGridder(void) {
         GLfloat *inputGrid = (GLfloat*) malloc(sizeof (GLfloat) * gridElements);
         loadGridFromFile(inputGrid, config.gridDimension);
         compareGrids(gridBuffer, inputGrid, config.gridDimension);
+        generateHistogramFile(gridBuffer, inputGrid, config.gridDimension);
         free(inputGrid);
     }
     // Terminate program
@@ -860,6 +916,7 @@ void createWProjectionPlanes(FloatComplex *wTextures)
 {                
     int convolutionSize = config.kernelResolutionSize;
     int textureSupport = config.kernelTexSize;
+    
     int convHalf = convolutionSize/2;
     int numWPlanes = config.wProjectNumPlanes;
     double wScale = config.wScale;
@@ -883,7 +940,7 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         double fresnel = w * ((0.5 * config.fieldOfView)*(0.5 * config.fieldOfView));
         int wFullSupport = calcWFullSupport(w, config.wToMaxSupportRatio, config.kernelMinFullSupport);
         printf("Creating W Plane: (%d) For w = %f, field of view = %f, " \
-                "fresnel number = %f, full w support: %d\n", iw, w, config.fieldOfView, fresnel, wFullSupport);
+                "fresnel number = %f, full w support: %d texSupport : %d\n", iw, w, config.fieldOfView, fresnel, wFullSupport, textureSupport);
         
         // Calculate Prolate Spheroidal
         createScaledSpheroidal(spheroidal, wFullSupport, convHalf);
@@ -903,35 +960,62 @@ void createWProjectionPlanes(FloatComplex *wTextures)
             saveKernelToFile("output/wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
         
         // Interpolate w projection kernel down to texture support dimensions
-        DoubleComplex *interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
-        interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
-        
-        if(iw == plane)
-            saveKernelToFile("output/wproj_%f_after_interpolated_%d.csv", w, textureSupport, interpolated);
-        
-        // Normalize the kernel
-        normalizeKernel(interpolated, textureSupport, wFullSupport);
-        
-        if(iw == plane)
-            saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, textureSupport, interpolated);
-        
-        // Bind interpolated kernel to texture matrix
-        for(int y = 0; y < textureSupport; y++)
+         DoubleComplex *interpolated;
+        if(config.useRadial)
+        {   interpolated = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
+            memcpy(interpolated,shift,convolutionSize * convolutionSize* sizeof(DoubleComplex));
+            normalizeKernel(interpolated, convolutionSize, wFullSupport);
+            
+            if(iw == plane)
+                saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, convolutionSize, interpolated);
+        }
+        else
         {
-            for(int x = 0; x < textureSupport; x++)
-            {
-                DoubleComplex interpWeight = interpolated[y * textureSupport + x];
+            interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
+            interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
+            if(iw == plane)
+                saveKernelToFile("output/wproj_%f_after_interpolated_%d.csv", w, textureSupport, interpolated);
+            // Normalize the kernel
+            normalizeKernel(interpolated, textureSupport, wFullSupport);
+            if(iw == plane)
+                saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, textureSupport, interpolated);  
+        }
+        // Bind interpolated kernel to texture matrix
+        
+        if(config.useRadial)
+        {   int halfPoint = convolutionSize*(convHalf)+(convHalf);
+            for(int i=0;i<convHalf;i++)
+            {   DoubleComplex interpWeight = interpolated[halfPoint + i];
                 FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
-                int index = (iw * textureSupport * textureSupport) + (y * textureSupport) + x;
+                int index = (iw * convHalf)  + i;
                 wTextures[index] = weight;
+                if(i==(convHalf-1))
+                {   wTextures[index].real = 0.0f;
+                    wTextures[index].imaginary = 0.0f;
+                }     
             }
         }
-        
+        else
+        {   for(int y = 0; y < textureSupport; y++)
+            {
+                for(int x = 0; x < textureSupport; x++)
+                {
+                    DoubleComplex interpWeight = interpolated[y * textureSupport + x];
+                    FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
+                    int index = (iw * textureSupport * textureSupport) + (y * textureSupport) + x;
+                    wTextures[index] = weight;
+                }
+                
+            }  
+        } 
         free(interpolated);
         memset(screen, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
         memset(shift, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
     }
-    
+    if(config.useRadial && plane >= 0)
+    {
+        saveRadialKernelsToFile("output/wproj_%d_radial_%d.csv",convHalf,numWPlanes,wTextures);
+    }
     free(spheroidal);
     free(screen);
     free(shift);
@@ -951,20 +1035,33 @@ void createWProjectionPlanes(FloatComplex *wTextures)
 void createScaledSpheroidal(double *spheroidal, int wFullSupport, int convHalf)
 {
     int wHalfSupport = wFullSupport/2;
-    double *nu = calloc(wFullSupport, sizeof(double));
-    double *tempSpheroidal = calloc(wFullSupport, sizeof(double));
+    int paddedWFullSupp = wFullSupport+2;
+    double *nu = calloc(paddedWFullSupp, sizeof(double));
+    double *tempSpheroidal = calloc(paddedWFullSupp, sizeof(double));
     // Calculate steps
-    for(int i = 0; i < wFullSupport; i++)
-    {
-        nu[i] = fabs(calcSpheroidalShift(i, wFullSupport));
-    }
+    for(int i = 0; i < paddedWFullSupp; i++)
+        nu[i] = fabs(calcSpheroidalShift(i, paddedWFullSupp));
         
     // Calculate curve from steps
-    calcSpheroidalCurve(nu, tempSpheroidal, wFullSupport);
+    calcSpheroidalCurve(nu, tempSpheroidal, paddedWFullSupp);
+    
+//    printf(">>> Printing Spheroidal\n");
+//    for(int i = 0; i < paddedWFullSupp; i++)
+//        printf("%f\n", tempSpheroidal[i]);
+//    printf(">>> Done\n");
+    
+    // Antialiasing?
+    for(int i = 0; i < paddedWFullSupp; i++)
+        tempSpheroidal[i] *= (1.0 - pow(nu[i], 2.0));
+    
+//    printf(">>> Printing Spheroidal\n");
+//    for(int i = 0; i < paddedWFullSupp; i++)
+//        printf("%f\n", tempSpheroidal[i]);
+//    printf(">>> Done\n");   
     
     // Bind weights to middle
     for(int i = convHalf-wHalfSupport; i <= convHalf+wHalfSupport; i++)
-        spheroidal[i] = tempSpheroidal[i-(convHalf-wHalfSupport)];    
+        spheroidal[i] = tempSpheroidal[i-(convHalf-wHalfSupport)+1];    
     
     free(tempSpheroidal);
     free(nu);
@@ -1371,7 +1468,23 @@ void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data)
     fclose(file);
     printf("FILE SAVED\n");
 }
-
+void saveRadialKernelsToFile(char* filename, int support, int wPlanes, FloatComplex* data)
+{
+    char *buffer[100];
+    sprintf(buffer, filename, wPlanes, support);
+    FILE *file = fopen(buffer, "w");
+    for(int r = 0; r < wPlanes; r++)
+    {   
+        int index = r * support; 
+        for(int c = 0; c < support; c++)
+        {
+                fprintf(file, "%f, ", data[index+c].real);
+        }
+        fprintf(file, "\n");
+    }
+    fclose(file);
+    printf("FILE SAVED\n");
+}
 void saveGridToFile(int support)
 {    
     int saveSupport = config.gridDimension;             // 512
@@ -1500,4 +1613,36 @@ void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension)
     
     printf(">>> Comparing grids - COMPLETE\n");
 }
+
+void generateHistogramFile(GLfloat *gridA, GLfloat *gridB, int width)
+{
+    printf(">>> Generating histogram data...\n");
+    FILE *file = fopen("histogram_data.csv", "w");
+    DoubleComplex elementA, elementB, difference;
+    double magnitudeA = 0, magnitudeB = 0;
+    int index = 0;
+    
+    for(int r = 0; r < width; r++)
+    {
+        for(int c = 0; c < width*4; c+=4)
+        {
+            index = (r * width * 4) + c;
+            // Get element
+            elementA = (DoubleComplex) {.real = gridA[index+1], .imaginary = gridA[index+2]};
+            elementB = (DoubleComplex) {.real = gridB[index+1], .imaginary = gridB[index+2]};
+            // Calculate magnitude
+            magnitudeA = sqrt(elementA.real * elementA.real + elementA.imaginary * elementA.imaginary);
+            magnitudeB = sqrt(elementB.real * elementB.real + elementB.imaginary * elementB.imaginary);
+            
+            difference = complexSubtract(elementA, elementB);
+            double magnitudeDiff = sqrt(difference.real * difference.real + difference.imaginary * difference.imaginary);
+            if(magnitudeDiff > 0.01)
+                 fprintf(file, "%.10f, %.10f\n", difference.real, difference.imaginary);
+            
+        }
+    }
+    fclose(file);
+    printf(">>> Histogram data saved to file\n");
+}
+
 
