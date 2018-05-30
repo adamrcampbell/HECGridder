@@ -112,19 +112,22 @@ int windowDisplay;
 Config config;
 
 
-//CHANGES: - numWPlanes set to 5, gridDimension set to 100, changed texture to a 2D
-//altered GPU.h fragment shader to allow Radial including use of Sampler2D, testing 1 visibility only
+//CHANGES: - , gridDimension set to 100, 
+// testing 1 visibility only
 //kernel function now calling new test routine where calloc is called
+//using dummy kernel, kernel dimensions now only use 2.
+
+
 
 void initConfig(void) 
 {
     // Scale grid dimension down for GUI rendering
-    windowDisplay = 900;
+    windowDisplay = 800;
     
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernelTexSize = 128;
+    config.kernelTexSize = 256;
     
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
@@ -132,7 +135,10 @@ void initConfig(void)
     config.kernelResolutionSize = 512;
     
     // Single dimension of the grid
-    config.gridDimension = 18000.0f;
+    
+    config.gridDimension = 18000.0f; 
+    
+    config.renderDimension = config.gridDimension;
     
     // Full support of min/max kernel supported per observation
     // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
@@ -160,6 +166,8 @@ void initConfig(void)
     // Note: slows down gridding a batch of visibilities, but improves precision
     config.useHeavyInterpolation = true;
     
+    config.accumulateMode = false;
+    
     // used to enable radial Texturing (2D kernels) or Cube texturing (3D)
     config.useRadial = false;
     
@@ -172,7 +180,11 @@ void initConfig(void)
     // variable used to control when the Gridder will exit after reaching the dump count, 
     // use a negative value to keep "infinite" gridding. 
     // Note: number of actual iterations is terminationDumpCount * displayDumpTime assuming dumpCount positive
-    teminationDumpCount = -1;
+    teminationDumpCount = 1;
+    //flag to save resulting grid to file (does this at dump time)
+    config.saveGridToFile = false;
+    
+    
     
     // Flag if want to compare HEC gridder output to Oxford gridder output (ensure file input locations are defined)
     // Note: only compares on first iteration, remainder are just processed for timing output and GUI rendering.
@@ -181,25 +193,24 @@ void initConfig(void)
     
     // Source of Oxford grid output (real component)
     config.inputGridComparisonReal = "grids/oxford_grid_82-70_real.csv";
+    //config.inputGridComparisonReal = "output/grid_real_highResCube.csv";
     
     // Source of Oxford grid output (imaginary component)
     config.inputGridComparisonImag = "grids/oxford_grid_82-70_imag.csv";
+    //config.inputGridComparisonImag = "output/grid_imag_highResCube.csv";
     
     // Used to slow down GUI rendering (milliseconds) - 0 means no delay, 1000 means one second delay
     config.refreshDelay = 0;
     
-    // Calculates the OpenGL "world" coordinate system for gridding
-    // Note: grid center (0.0, 0.0) is center of world
-    float gridDimFloat = (float) config.gridDimension;
     GLfloat renderTemp[8] = {
-        -gridDimFloat/2.0f, -gridDimFloat/2.0f,
-        -gridDimFloat/2.0f, gridDimFloat/2.0f,
-        gridDimFloat/2.0f, -gridDimFloat/2.0f,
-        gridDimFloat/2.0f, gridDimFloat/2.0f
+        -1.0f, -1.0f,
+        -1.0f, 1.0f,
+        1.0f, -1.0f,
+        1.0f, 1.0f
     };
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
     
-    // Maximum W term to support
+    // MaximuFm W term to support
     config.wProjectionMaxW = 7083.386050;
     
     // Cell size radians for observation
@@ -218,14 +229,16 @@ void initConfig(void)
     config.graphicMultiplier = 1.0f;
     
     // Scales visibility UV coordinates to grid coordinates
-    config.uvScale = (double) config.gridDimension * config.cellSizeRad * config.graphicMultiplier; 
+    config.uvScale = (double) config.renderDimension * config.cellSizeRad * config.graphicMultiplier; 
     
     // Used to calculate required W full support per w term
     config.wToMaxSupportRatio = ((config.kernelMaxFullSupport - config.kernelMinFullSupport) / config.wProjectionMaxW);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) {            
     
+    // Define mem cleanup function on exit
+    atexit(cleanup);
     initConfig();
     
     srand((unsigned int) time(NULL));
@@ -265,7 +278,7 @@ void initGridder(void)
     glClampColorARB(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
 
     srand(time(NULL));
-    int size = 4 * config.gridDimension*config.gridDimension;
+    int size = 4 * config.renderDimension*config.renderDimension;
     gridBuffer = (GLfloat*) malloc(sizeof (GLfloat) * size);
     memset(gridBuffer, 0, size);
 
@@ -358,7 +371,7 @@ void initGridder(void)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_2D);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, config.gridDimension, config.gridDimension, 0, GL_RGBA, GL_FLOAT, gridBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, config.renderDimension, config.renderDimension, 0, GL_RGBA, GL_FLOAT, gridBuffer);
 
     glGenFramebuffers(1, idArray);
     fboID = idArray[0];
@@ -378,6 +391,10 @@ void initGridder(void)
     else
     {    kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * config.wProjectNumPlanes, sizeof(FloatComplex));
          createWProjectionPlanes(kernelBuffer);
+    
+       //  createTestPlanes(kernelBuffer,config.kernelTexSize,config.kernelTexSize,config.wProjectNumPlanes); 
+    
+    
          KERNEL_DIM = GL_TEXTURE_3D;
     }
     
@@ -385,12 +402,18 @@ void initGridder(void)
     //kernal TEXTURE
     kernalTextureID = idArray[1];
     glBindTexture(KERNEL_DIM, kernalTextureID);
+    
     glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+    
     if(!config.useRadial)
         glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    
+    float borderColours[] = {0.0f,0.0f,0.0f,1.0f};
+    glTexParameterfv(KERNEL_DIM,GL_TEXTURE_BORDER_COLOR, borderColours);
     glEnable(KERNEL_DIM);
     // width, height, 
     if(config.useRadial)
@@ -400,7 +423,13 @@ void initGridder(void)
 
     glBindTexture(KERNEL_DIM, 0);
     
+    
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
+    glPointParameteri(GL_POINT_SPRITE_COORD_ORIGIN,GL_LOWER_LEFT);
+    
+    
+  //  glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
+  //  glEnable(GL_POINT_SMOOTH);
     glEnable(GL_POINT_SPRITE);
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
     
@@ -414,6 +443,37 @@ void initGridder(void)
     
     printf("SEEMS LIKE ITS ALL SET UP FINE??? \n");
 }
+
+ void createTestPlanes(FloatComplex *kernelBuffer, int totalWidth, int totalHeight, int totalDepth)
+ {  for(int w=0;w<totalDepth;w++)
+    {
+        for(int y = 0; y < totalHeight; y++)
+        {
+            for(int x = 0; x < totalWidth; x++)
+            {
+                int index = (w * totalWidth * totalHeight) + (y * totalWidth) + x;
+                kernelBuffer[index].real = x+10;
+                kernelBuffer[index].imaginary = y+1;
+                
+            }       
+        }
+    } 
+ 
+ 
+    for(int w=0;w<totalDepth;w++)
+    {
+        for(int y = 0; y < totalHeight; y++)
+        {
+            for(int x = 0; x < totalWidth; x++)
+            {
+                int index = (w * totalWidth * totalHeight) + (y * totalWidth) + x;
+                printf("(%f,%f) ",kernelBuffer[index].real,kernelBuffer[index].imaginary = y);
+            } 
+            printf("\n");
+        }
+        printf("\n=====================\n");
+    }
+ }
 
 void createRadialPlanesTest(FloatComplex *kernel,int totalWidth, int totalHeight)
 {
@@ -449,8 +509,8 @@ void setShaderUniforms(void)
     glUseProgram(sProgram);
     glUniform1f(uMinSupportOffset, config.kernelMinFullSupport);
     glUniform1f(uWToMaxSupportRatio, (config.kernelMaxFullSupport-config.kernelMinFullSupport)/config.wProjectionMaxW); //(maxSuppor-minSupport) / maxW
-    glUniform1f(uGridCenter, ((float) config.gridDimension - 0.5) / 2.0);
-    float centerOffset = config.offsetVisibilities ? (0.5 / ((float) config.gridDimension / 2.0)) : 0.0;
+    glUniform1f(uGridCenter, ((float) config.renderDimension) / 2.0);
+    float centerOffset =  (1.0f / (float) config.renderDimension);
     printf("Center Offset: %f\n", centerOffset);
     glUniform1f(uGridCenterOffset, centerOffset);
     glUniform1f(uWScale, config.wScale);
@@ -460,7 +520,7 @@ void setShaderUniforms(void)
     glUseProgram(0);
     
     glUseProgram(sProgramRender);
-    glUniform1f(uGridSizeRender, config.gridDimension);
+    glUniform1f(uGridSizeRender, config.renderDimension);
     glUseProgram(0);  
     printf("DONE WITH SETTING THE SHADER UNIFORMS\n");
 }
@@ -486,16 +546,21 @@ void runGridder(void) {
             // U, V, W, Real, Imaginary, Weight
             visibilities[i] =  0.0;// * scale;
             visibilities[i + 1] = 0.0;// * scale;
-            visibilities[i + 2] = 7041.0f; //* scale;
+            visibilities[i + 2] = 7050.0; //* scale;
             visibilities[i + 3] = 1.0;
-            visibilities[i + 4] = 1.0;
+            visibilities[i + 4] = 0.0;
             visibilities[i + 5] = 1.0f;
         }
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, fboID);
+    if(!config.accumulateMode)
+    {   glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    } 
+    
     glEnable(GL_BLEND);
-    glViewport(0, 0, config.gridDimension, config.gridDimension);
+    glViewport(0, 0, config.renderDimension, config.renderDimension);
 
     struct timeval timeFunctionReal;
     gettimeofday(&timeFunctionReal, 0);
@@ -541,6 +606,8 @@ void runGridder(void) {
     glFinish();
     //DRAW RENDERING
     glViewport(0, 0, windowDisplay, windowDisplay);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glUseProgram(sProgramRender);
     glBindTexture(GL_TEXTURE_2D, textureID);
     glUniform1i(uShaderTextureHandle, 0);
@@ -569,12 +636,13 @@ void runGridder(void) {
         
         // Ensure OpenGL has finished
         glFinish();
-        glReadPixels(0, 0, config.gridDimension, config.gridDimension,  GL_RGBA, GL_FLOAT, gridBuffer);
+        glReadPixels(0, 0, config.renderDimension, config.renderDimension,  GL_RGBA, GL_FLOAT, gridBuffer);
         glFinish();
         
         // This function can be used if you wish to save the gridder results to file
         // Saves convolutional weights, grid real, and grid imaginary
-       // saveGridToFile(config.gridDimension);
+         if(config.saveGridToFile)
+             saveGridToFile(config.renderDimension);
         
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -591,11 +659,12 @@ void runGridder(void) {
     
     if(config.compareToOxfordGrid && totalDumpsPerformed == 1 && dumped)
     {
-        int gridElements = 4 * config.gridDimension * config.gridDimension;
+        int gridElements = 4 * config.renderDimension * config.renderDimension;
         GLfloat *inputGrid = (GLfloat*) malloc(sizeof (GLfloat) * gridElements);
-        loadGridFromFile(inputGrid, config.gridDimension);
-        compareGrids(gridBuffer, inputGrid, config.gridDimension);
-        generateHistogramFile(gridBuffer, inputGrid, config.gridDimension);
+        loadGridFromFile(inputGrid, config.renderDimension);
+        compareGridsAnthonyNorm(gridBuffer, inputGrid, config.renderDimension);
+        compareGrids(gridBuffer, inputGrid, config.renderDimension);
+        // generateHistogramFile(gridBuffer, inputGrid, config.renderDimension);
         free(inputGrid);
     }
     // Terminate program
@@ -751,6 +820,11 @@ DoubleComplex complexAdd(DoubleComplex x, DoubleComplex y)
     return z;
 }
 
+double complexMagnitude(double x, double y)
+{
+    return sqrt(x * x + y * y);
+}
+
 /*
  * Function: complexSubtract 
  * --------------------
@@ -880,14 +954,16 @@ void interpolateKernel(DoubleComplex *source, DoubleComplex* dest, int resolutio
     
     for(int y = 0; y < textureSupport; y++)
     {
-        yShift = calcInterpolateShift((float) y, (float) (textureSupport-1));
+        // yShift = calcInterpolateShift((float) y, (float) (textureSupport-1));
+        yShift = calcInterpolateShift((float) y, (float) (textureSupport));
         
         for(int x = 0; x < textureSupport; x++)
         {
-            xShift = calcInterpolateShift((float) x, (float) (textureSupport-1));
+            // xShift = calcInterpolateShift((float) x, (float) (textureSupport-1));
+            xShift = calcInterpolateShift((float) x, (float) (textureSupport));
             getBicubicNeighbours(xShift, yShift, neighbours, resolutionSupport, source);
             
-            for(int i  = 0; i < 4; i++)
+            for(int i  = 0; i < 4; i++)//
             {
                 InterpolationPoint newPoint = (InterpolationPoint) {.xShift = xShift, .yShift = neighbours[(i*4)+1].yShift};
                 newPoint = interpolateCubicWeight(neighbours, newPoint, i*4, resolutionSupport-1, true);
@@ -924,12 +1000,12 @@ void createWProjectionPlanes(FloatComplex *wTextures)
     
     // Flat two dimension array
     DoubleComplex *screen = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
-    // Create w screen
+    // Create w screen 
     DoubleComplex *shift = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
     
      // Test variable to output W plane creation steps
     // (phase screen, after fft, interpolated, normalized)
-    int plane = -1;
+    int plane = 338;
     printf("Num W Planes: %d\n", numWPlanes);
     for(int iw = 0; iw < numWPlanes; iw++)
     {        
@@ -1329,16 +1405,18 @@ InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, Interpolat
 void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighbours, int resolutionSupport, DoubleComplex* matrix)
 {
     // Get x, y from scaled shift 
-    int scaledPosX = calcPosition(xShift, resolutionSupport);
-    int scaledPosY = calcPosition(yShift, resolutionSupport);
+    int scaledPosX = calcPosition(xShift, resolutionSupport-2)+1;
+    int scaledPosY = calcPosition(yShift, resolutionSupport-2)+1;
 
+    //printf("[ X: %d, Y: %d ] \n", scaledPosX, scaledPosY);
+    
     // Get 16 neighbours
     for(int r = scaledPosY - 1, i = 0; r < scaledPosY + 3; r++)
     {
         for(int c = scaledPosX - 1; c < scaledPosX + 3; c++)
         {
-            InterpolationPoint n = (InterpolationPoint) {.xShift = calcInterpolateShift(c-1, resolutionSupport-2),
-                .yShift = calcInterpolateShift(r-1, resolutionSupport-2)};
+            InterpolationPoint n = (InterpolationPoint) {.xShift = calcResolutionShift(c, resolutionSupport),
+                .yShift = calcResolutionShift(r, resolutionSupport)};
             
             if(c < 1 || c >= resolutionSupport || r < 1 || r >= resolutionSupport)
             {
@@ -1350,8 +1428,11 @@ void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighb
             }
             
             neighbours[i++] = n;
+            // printf("[R: %d, C: %d, X: %.3f, Y: %.3f]", r, c, n.xShift, n.yShift);
         }
+        // printf("\n");
     }
+    // printf("\n\n");
 }
 
 float calcSpheroidalShift(int index, int width)
@@ -1359,9 +1440,14 @@ float calcSpheroidalShift(int index, int width)
     return -1.0 + index * getShift(width-1);
 }
 
+float calcResolutionShift(float index, float width)
+{
+    return -1.0 + ((index-1.0) * (2.0 / (width-2.0)));
+}
+
 float calcInterpolateShift(float index, float width)
 {
-    return -1.0 + (index * (2.0 / width));
+    return -1.0 + ((2.0 * index + 1.0) / width);
 }
 
 float calcShift(int index, int width, float start)
@@ -1418,32 +1504,36 @@ void saveRadialKernelsToFile(char* filename, int support, int wPlanes, FloatComp
     fclose(file);
     printf("FILE SAVED\n");
 }
+
 void saveGridToFile(int support)
 {    
-    int saveSupport = config.gridDimension;             // 512
-    int saveRowMin = (support/2)-(saveSupport/2);       // 9000 - 256
-    int saveRowMax = (support/2)+(saveSupport/2);       // 9000 + 256
-    int saveColMin = (support*4/2)-(saveSupport*4/2);
-    int saveColMax = (support*4/2)+(saveSupport*4/2);
-    
+    printf(">>> Saving grid to file...\n");
     // Save to file (real portion)
-    FILE *file_real = fopen("output/grid_real.csv", "w");
-    FILE *file_imag = fopen("output/grid_imag.csv", "w");
-    FILE *file_weight = fopen("output/grid_weight.csv", "w");
-    for(int r = saveRowMin; r < saveRowMax; r++)
+    FILE *file_real = fopen("output/grid_real_512.csv", "w");
+    FILE *file_imag = fopen("output/grid_imag_512.csv", "w");
+    double realSum = 0.0, imagSum = 0.0;
+    int index = 0;
+    //FILE *file_weight = fopen("output/grid_weight.csv", "w");
+    for(int r = 0; r < config.renderDimension; r++)
     {
-        for(int c = saveColMin; c < saveColMax; c+=4)
-        {   fprintf(file_weight, "%+f, ", gridBuffer[(r*(int)config.gridDimension*4)+c]);
-            fprintf(file_real, "%+f, ", gridBuffer[(r*(int)config.gridDimension*4)+c+1]);
-            fprintf(file_imag, "%+f, ", gridBuffer[(r*(int)config.gridDimension*4)+c+2]);
+        for(int c = 0; c < config.renderDimension*4; c+=4)
+        {   
+            index = (r * ((int) config.renderDimension) * 4) + c;
+            //fprintf(file_weight, "%+f, ", gridBuffer[(r*(int)config.renderDimension*4)+c]);
+            fprintf(file_real, "%+f, ", gridBuffer[index+1]);
+            fprintf(file_imag, "%+f, ", gridBuffer[index+2]);
+            realSum += gridBuffer[index+1];
+            imagSum += gridBuffer[index+2];
         }
         fprintf(file_real, "\n");
         fprintf(file_imag, "\n");
-        fprintf(file_weight, "\n");
+        //fprintf(file_weight, "\n");
     }
     fclose(file_real);
     fclose(file_imag);
-    fclose(file_weight);
+    //fclose(file_weight);
+    
+    printf("RealSum: %f, ImagSum: %f\n", realSum, imagSum);
     printf("Grid has been output to file\n");
 }
 
@@ -1453,8 +1543,12 @@ void loadGridFromFile(GLfloat *grid, int gridDimension)
     
     FILE *realFile = fopen(config.inputGridComparisonReal, "r");
     FILE *imagFile = fopen(config.inputGridComparisonImag, "r");
-    int index = 0;
-    float real = 0.0, imaginary = 0.0;
+    
+    if(!realFile || !imagFile)
+        printf("FAIL!!! Couldnt load grid files\n");
+    
+    int index = 0, counter = 0;
+    float real = -1.0, imaginary = -1.0;
     float rMin = 100000.0, rMax = 0.0, iMin = 100000.0, iMax = 0.0;
     
     for(int r = 0; r < gridDimension; r++)
@@ -1476,8 +1570,12 @@ void loadGridFromFile(GLfloat *grid, int gridDimension)
                 iMin = imaginary;
             if(imaginary > iMax)
                 iMax = imaginary;
+            
+            counter++;
         }
     }
+    
+    printf("Total elements found: %d\n", counter);
     
     printf("rMin: %f, rMax: %f, iMin: %f, iMax: %f\n", rMin, rMax, iMin, iMax);
     
@@ -1485,6 +1583,64 @@ void loadGridFromFile(GLfloat *grid, int gridDimension)
     fclose(imagFile);
      
     printf(">>> Reading input grid - COMPLETE\n");
+}
+
+void compareGridsL2Norm(GLfloat *gridA, GLfloat *gridB, int gridDimension)
+{
+    printf(">>> Comparing grids using L2 norm\n");
+    
+    int counter = 0, index = 0;
+    double difference = 0.0;
+    double r1, r2, i1, i2;
+    
+    for(int r = 0; r < gridDimension; r++)
+    {
+        for(int c = 0; c < gridDimension*4; c+=4)
+        {
+            index = (r * gridDimension * 4) + c;
+            r1 = gridA[index+1];
+            i1 = gridA[index+2];
+            r2 = gridB[index+1];
+            i2 = gridB[index+2];
+            
+            if(complexMagnitude(r1, i1) > 0.0 || complexMagnitude(r2, i2) > 0.0)
+            {
+                difference += complexMagnitude(r1-r2, i1-i2);
+                counter++;
+            }
+        }
+    }
+    
+    // Could technically cause divide by zero error
+    printf("Difference (L2 Norm): %f\n\n", difference/counter);
+}
+
+void compareGridsAnthonyNorm(GLfloat *gridA, GLfloat *gridB, int gridDimension)
+{
+    printf(">>> Comparing grids using Anthony L2 norm\n");
+    
+    int index = 0;
+    double difference = 0.0, gridBNorm = 0.0;
+    double realDiff, imagDiff;
+    
+    for(int r = 0; r < gridDimension; r++)
+    {
+        for(int c = 0; c < gridDimension*4; c+=4)
+        {
+            index = (r * gridDimension * 4) + c;
+            realDiff = gridA[index+1]-gridB[index+1];
+            imagDiff = gridA[index+2]-gridB[index+2];
+            
+            difference += (realDiff * realDiff + imagDiff * imagDiff);
+            gridBNorm += (gridB[index+1] * gridB[index+1] + gridB[index+2] * gridB[index+2]);
+        }
+    }
+    
+    difference = sqrt(difference);
+    gridBNorm = sqrt(gridBNorm);
+    
+    // Could technically cause divide by zero error
+    printf("Difference (Anthony L2 Norm): %f\n\n", difference/gridBNorm);
 }
 
 void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension)
@@ -1503,10 +1659,10 @@ void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension)
             index = (r * gridDimension * 4) + c;
             
             // Accumulate sums
-            realSumHEC += gridA[index+1];
-            imagSumHEC += gridA[index+2];
-            realSumNAG += gridB[index+1];
-            imagSumNAG += gridB[index+2];
+            realSumHEC += (gridA[index+1]);
+            imagSumHEC += (gridA[index+2]);
+            realSumNAG += (gridB[index+1]);
+            imagSumNAG += (gridB[index+2]);
             
             if(gridA[index+1] < rMin)
                 rMin = gridA[index+1];
@@ -1519,7 +1675,7 @@ void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension)
                 iMax = gridA[index+2];
             
             
-            if((fabs(gridA[index+1]) + fabs(gridA[index+2])) > 0.0)
+            if(complexMagnitude(gridA[index+1], gridA[index+2]) > 0.0 || complexMagnitude(gridB[index+1], gridB[index+2]) > 0.0)
             {
                 rDiff = gridA[index+1] - gridB[index+1];
                 iDiff = gridA[index+2] - gridB[index+2];
@@ -1578,4 +1734,12 @@ void generateHistogramFile(GLfloat *gridA, GLfloat *gridB, int width)
     printf(">>> Histogram data saved to file\n");
 }
 
-
+void cleanup(void)
+{
+    // Gross memory free logic...
+    printf(">>> Cleaning up memory before exiting...\n");
+    if(gridBuffer)        free(gridBuffer);
+    if(visibilities)      free(visibilities);
+    if(visibilityIndices) free(visibilityIndices);
+    if(kernelBuffer)      free(kernelBuffer);
+}
