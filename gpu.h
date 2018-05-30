@@ -41,14 +41,16 @@
   out float wPlane;\
   out float conjugate;\
   void main() { \
-     gl_Position.rg = ((position.rg*uvScale) / gridCenter) + gridCenterOffset; \
-     wPlane = sqrt(abs(position.b*wScale)) * wStep; \
+     gl_Position.rg = ((position.rg*uvScale) / gridCenter) + vec2(gridCenterOffset,gridCenterOffset); \
+     wPlane = sqrt(abs(position.b*wScale)) * wStep + (0.5 * wStep);\
      float wSupport = abs(wToMaxSupportRatio*position.b) + minSupportOffset; \
      conjugate = -sign(position.b);\
-     gl_PointSize = wSupport + (1.0 - mod(wSupport, 2.0)) + 0.04; \
+     gl_PointSize = wSupport + (1.0 - mod(wSupport, 2.0));\
      fComplex = complex.rg * complex.b; \
   }"
-
+///gl_Position.rg = ((position.rg*uvScale) / gridCenter) + gridCenterOffset; 
+//wSupport + (1.0 - mod(wSupport, 2.0))
+//wPlane = sqrt(abs(position.b*wScale)) * wStep; 
 /*
  * Shader Program: VERTEX_SHADER_SNAP (invoked once per bound visibility)
  * --------------------
@@ -72,11 +74,11 @@
   out float wPlane;\
   out float conjugate;\
   void main() { \
-     gl_Position.rg = (round(position.rg*uvScale) / gridCenter) + gridCenterOffset; \
+     gl_Position.rg = (round(position.rg*uvScale) / gridCenter) + vec2(gridCenterOffset, -gridCenterOffset); \
      wPlane = round(sqrt(abs(position.b*wScale))) * wStep; \
      float wSupport = abs(wToMaxSupportRatio*position.b) + minSupportOffset; \
      conjugate = -sign(position.b);\
-     gl_PointSize = wSupport + (1.0 - mod(wSupport, 2.0)) + 0.04; \
+     gl_PointSize = wSupport + (1.0 - mod(wSupport, 2.0)); \
      fComplex = complex.rg * complex.b; \
   }"
 
@@ -148,12 +150,12 @@
 // Performs rendering to screen (not gridding)
 #define VERTEX_SHADER_RENDER " \
   #version 430\n \
-  in vec4 position;\
+  in vec2 position;\
   out vec2 texCoord;\
   uniform float gridSize;\
   void main() { \
-    gl_Position.rg = (position.rg) / ((gridSize-0.5)/2.0); \
-    texCoord = gl_Position.rg*0.5 + 0.5;\
+    gl_Position.xy = position.xy;\
+    texCoord = position.xy*0.5 + 0.5;\
   }"
 
 #endif /* GPU_H */

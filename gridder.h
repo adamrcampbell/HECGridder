@@ -16,6 +16,7 @@
 typedef struct Config {
     // General
     unsigned int gridDimension;
+    unsigned int renderDimension;
     unsigned int kernelTexSize;
     unsigned int kernelResolutionSize;
     float kernelMaxFullSupport;
@@ -28,6 +29,8 @@ typedef struct Config {
     bool compareToOxfordGrid;
     bool useHeavyInterpolation;
     bool useRadial;
+    bool accumulateMode;
+    bool saveGridToFile;
 
     // GUI
     unsigned int refreshDelay;
@@ -97,6 +100,7 @@ void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, Dou
 void calcBitReversedIndices(int n, int* indices);
 void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted);
 
+float calcResolutionShift(float index, float width);
 float calcInterpolateShift(float index, float width);
 double getShift(double width);
 void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighbours, int resolutionSupport, DoubleComplex* matrix);
@@ -111,10 +115,14 @@ DoubleComplex complexAdd(DoubleComplex x, DoubleComplex y);
 DoubleComplex complexSubtract(DoubleComplex x, DoubleComplex y);
 DoubleComplex complexMultiply(DoubleComplex x, DoubleComplex y);
 DoubleComplex complexConjugateExp(double ph);
+double complexMagnitude(double x, double y);
 
 void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension);
+void compareGridsL2Norm(GLfloat *gridA, GLfloat *gridB, int gridDimension);
+void compareGridsAnthonyNorm(GLfloat *gridA, GLfloat *gridB, int gridDimension);
 void loadGridFromFile(GLfloat *grid, int gridDimension);
 void generateHistogramFile(GLfloat *gridA, GLfloat *gridB, int width);
+void cleanup(void);
 
 #endif /* GRIDDER_H */
 
