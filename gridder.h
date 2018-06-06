@@ -11,6 +11,10 @@
 #define GRIDDER_H
 
 /*--------------------------------------------------------------------
+*   ENUMERATION
+*-------------------------------------------------------------------*/
+enum FragShaderType{FullCube = 0, Radial = 1, Reflect = 2};
+/*--------------------------------------------------------------------
 *   STRUCTS
 *-------------------------------------------------------------------*/
 typedef struct Config {
@@ -28,7 +32,6 @@ typedef struct Config {
     bool offsetVisibilities;
     bool compareToOxfordGrid;
     bool useHeavyInterpolation;
-    bool useRadial;
     bool accumulateMode;
     bool saveGridToFile;
 
@@ -50,6 +53,8 @@ typedef struct Config {
     char* inputGridComparisonReal;
     char* inputGridComparisonImag;
     char* visibilitySourceFile;
+    
+    enum FragShaderType fragShaderType;
     
 } Config;
 
@@ -125,5 +130,4 @@ void generateHistogramFile(GLfloat *gridA, GLfloat *gridB, int width);
 void cleanup(void);
 
 #endif /* GRIDDER_H */
-
 

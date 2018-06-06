@@ -120,6 +120,22 @@
                                 kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
   }"
 
+#define FRAGMENT_SHADER_REFLECT " \
+  #version 430\n \
+  precision highp float; \
+  uniform sampler3D kernalTex;\
+  in vec2 fComplex; \
+  in float wPlane; \
+  in float conjugate; \
+  void main() { \
+    vec2 coord = abs(2.0*gl_PointCoord.xy - 1.0);\
+    vec2 kernelLookup = texture(kernalTex,vec3(coord.xy,wPlane)).rg; \
+    kernelLookup.g = kernelLookup.g * conjugate;\
+    gl_FragColor.ra = kernelLookup.rg; \
+    gl_FragColor.gb = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
+                                kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
+  }"
+
 #define FRAGMENT_SHADER " \
   #version 430\n \
   precision highp float; \
@@ -159,5 +175,4 @@
   }"
 
 #endif /* GPU_H */
-
 
