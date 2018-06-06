@@ -111,7 +111,6 @@ int windowDisplay;
 // Global gridder configuration
 Config config;
 
-
 //CHANGES: - , gridDimension set to 100, 
 // testing 1 visibility only
 //kernel function now calling new test routine where calloc is called
@@ -127,7 +126,7 @@ void initConfig(void)
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernelTexSize = 256;
+    config.kernelTexSize = 128;
     
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
@@ -138,7 +137,7 @@ void initConfig(void)
     
     config.gridDimension = 18000.0f; 
     
-    config.renderDimension = config.gridDimension;
+    config.renderDimension = 100.0f;//config.gridDimension;
     
     // Full support of min/max kernel supported per observation
     // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
@@ -150,7 +149,7 @@ void initConfig(void)
     config.visibilityCount = 1;
     
     // Flag to determine if reading visibilities from a source file
-    config.visibilitiesFromFile = true;
+    config.visibilitiesFromFile = false;
     
     // Source of visibility data
     config.visibilitySourceFile = "datasets/el82-70.txt";
@@ -168,8 +167,10 @@ void initConfig(void)
     
     config.accumulateMode = false;
     
-    // used to enable radial Texturing (2D kernels) or Cube texturing (3D)
-    config.useRadial = false;
+    // Flag to specify which fragment shader technique
+    // to use when rendering frags
+    // Options: FullCube, Radial, Reflect
+    config.fragShaderType = Radial;
     
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
     config.numVisibilityParams = 6;
@@ -182,14 +183,14 @@ void initConfig(void)
     // Note: number of actual iterations is terminationDumpCount * displayDumpTime assuming dumpCount positive
     teminationDumpCount = 1;
     //flag to save resulting grid to file (does this at dump time)
-    config.saveGridToFile = false;
+    config.saveGridToFile = true;
     
     
     
     // Flag if want to compare HEC gridder output to Oxford gridder output (ensure file input locations are defined)
     // Note: only compares on first iteration, remainder are just processed for timing output and GUI rendering.
     // Also only can compare the two grids at the same interval as the dump time
-    config.compareToOxfordGrid = true;
+    config.compareToOxfordGrid = false;
     
     // Source of Oxford grid output (real component)
     config.inputGridComparisonReal = "grids/oxford_grid_82-70_real.csv";
@@ -238,7 +239,7 @@ void initConfig(void)
 int main(int argc, char** argv) {            
     
     // Define mem cleanup function on exit
-    atexit(cleanup);
+    //atexit(cleanup);
     initConfig();
     
     srand((unsigned int) time(NULL));
@@ -331,8 +332,10 @@ void initGridder(void)
         vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER_SNAP);
     
     GLuint fragmentShader;
-    if(config.useRadial)
+    if(config.fragShaderType == Radial)
         fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_RADIAL);
+    else if(config.fragShaderType == Reflect)
+        fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_REFLECT);
     else
         fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
     
@@ -380,44 +383,45 @@ void initGridder(void)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     
-    if(config.useRadial)
-    {   printf("RADIAL MODE SET, KERNELTEX SIZE should be HALF OF RESOLUTION FOR BEST RESULTS ");
-        config.kernelTexSize = config.kernelResolutionSize/2;
-        kernelBuffer = calloc(config.kernelTexSize* config.wProjectNumPlanes, sizeof(FloatComplex));
-        createWProjectionPlanes(kernelBuffer);
-        //createRadialPlanesTest(kernelBuffer, config.kernelTexSize, config.wProjectNumPlanes);
+    KERNEL_DIM = GL_TEXTURE_3D;
+    
+    if(config.fragShaderType == Radial)
+    {
+        printf(">>> Using RADIAL based Fragment Shader...\n");
+        kernelBuffer = calloc((config.kernelTexSize/2) * config.wProjectNumPlanes, sizeof(FloatComplex));
         KERNEL_DIM = GL_TEXTURE_2D;
     }
-    else
-    {    kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * config.wProjectNumPlanes, sizeof(FloatComplex));
-         createWProjectionPlanes(kernelBuffer);
-    
-       //  createTestPlanes(kernelBuffer,config.kernelTexSize,config.kernelTexSize,config.wProjectNumPlanes); 
-    
-    
-         KERNEL_DIM = GL_TEXTURE_3D;
+    else if(config.fragShaderType == Reflect)
+    {
+        printf(">>> Using REFLECT based Fragment Shader...\n");
+        kernelBuffer = calloc((config.kernelTexSize/2) * (config.kernelTexSize/2) * config.wProjectNumPlanes, sizeof(FloatComplex));
     }
-    
-    
+    else
+    {
+        printf(">>> Using FULL CUBE based Fragment Shader...\n");
+        kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * config.wProjectNumPlanes, sizeof(FloatComplex));
+    }
+    createWProjectionPlanes(kernelBuffer);
     //kernal TEXTURE
     kernalTextureID = idArray[1];
     glBindTexture(KERNEL_DIM, kernalTextureID);
     
     glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-
-    
-    if(!config.useRadial)
+    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  
+    if(config.fragShaderType != Radial)
         glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     
     float borderColours[] = {0.0f,0.0f,0.0f,1.0f};
     glTexParameterfv(KERNEL_DIM,GL_TEXTURE_BORDER_COLOR, borderColours);
     glEnable(KERNEL_DIM);
-    // width, height, 
-    if(config.useRadial)
-        glTexImage2D(GL_TEXTURE_2D, 0,  GL_RG32F, config.kernelTexSize, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
+    
+    if(config.fragShaderType == Radial)
+        glTexImage2D(GL_TEXTURE_2D, 0,  GL_RG32F, config.kernelTexSize/2, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
+    else if(config.fragShaderType == Reflect)
+        glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize/2, config.kernelTexSize/2, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
     else
         glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize, config.kernelTexSize, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
 
@@ -546,7 +550,7 @@ void runGridder(void) {
             // U, V, W, Real, Imaginary, Weight
             visibilities[i] =  0.0;// * scale;
             visibilities[i + 1] = 0.0;// * scale;
-            visibilities[i + 2] = 7050.0; //* scale;
+            visibilities[i + 2] = 0.0; //* scale;2.833354
             visibilities[i + 3] = 1.0;
             visibilities[i + 4] = 0.0;
             visibilities[i + 5] = 1.0f;
@@ -1005,8 +1009,8 @@ void createWProjectionPlanes(FloatComplex *wTextures)
     
      // Test variable to output W plane creation steps
     // (phase screen, after fft, interpolated, normalized)
-    int plane = 338;
-    printf("Num W Planes: %d\n", numWPlanes);
+    int plane = 0;
+    printf("Num W Planes: %d and wScale %lf\n", numWPlanes, wScale);
     for(int iw = 0; iw < numWPlanes; iw++)
     {        
         // Calculate w term and w specific support size
@@ -1032,48 +1036,62 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         
         // Interpolate w projection kernel down to texture support dimensions
          DoubleComplex *interpolated;
-        if(config.useRadial)
-        {   interpolated = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
-            memcpy(interpolated,shift,convolutionSize * convolutionSize* sizeof(DoubleComplex));
-            normalizeKernel(interpolated, convolutionSize, wFullSupport);
-            
-            if(iw == plane)
-                saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, convolutionSize, interpolated);
-        }
-        else
-        {
-            interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
-            interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
-            if(iw == plane)
-                saveKernelToFile("output/wproj_%f_after_interpolated_%d.csv", w, textureSupport, interpolated);
-            // Normalize the kernel
-            normalizeKernel(interpolated, textureSupport, wFullSupport);
-            if(iw == plane)
-                saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, textureSupport, interpolated);  
-        }
-        // Bind interpolated kernel to texture matrix
+       
+        interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
+        interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
+        if(iw == plane)
+            saveKernelToFile("output/wproj_%f_after_interpolated_%d.csv", w, textureSupport, interpolated);
+        // Normalize the kernel
+        normalizeKernel(interpolated, textureSupport, wFullSupport);
+        if(iw == plane)
+            saveKernelToFile("output/wproj_%f_normalized_%d.csv", w, textureSupport, interpolated);  
         
-        if(config.useRadial)
-        {   int halfPoint = convolutionSize*(convHalf)+(convHalf);
-            for(int i=0;i<convHalf;i++)
-            {   DoubleComplex interpWeight = interpolated[halfPoint + i];
+         
+        // Bind interpolated kernel to texture matrix
+        if(config.fragShaderType == Radial)
+        {   
+            int startIndex =  textureSupport/2;
+            int kernelWidth = textureSupport/2;
+            
+            int y = startIndex;
+            
+            for(int x = startIndex; x < textureSupport; x++)
+            {
+                DoubleComplex interpWeight = interpolated[y * textureSupport + x];
                 FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
-                int index = (iw * convHalf)  + i;
+                int index = (iw * kernelWidth)  + (x-startIndex);
                 wTextures[index] = weight;
-                if(i==(convHalf-1))
+                
+                if(x==(textureSupport-1))
                 {   wTextures[index].real = 0.0f;
                     wTextures[index].imaginary = 0.0f;
-                }     
+                } 
             }
+          
+//            int halfPoint = textureSupport*(convHalf)+(convHalf);
+//            for(int i=0;i<convHalf;i++)
+//            {   DoubleComplex interpWeight = interpolated[halfPoint + i];
+//                FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
+//                int index = (iw * convHalf)  + i;
+//                wTextures[index] = weight;
+//                if(i==(convHalf-1))
+//                {   wTextures[index].real = 0.0f;
+//                    wTextures[index].imaginary = 0.0f;
+//                }     
+//            }
         }
         else
-        {   for(int y = 0; y < textureSupport; y++)
+        {   
+            int startIndex = (config.fragShaderType == Reflect) ? textureSupport/2 : 0;
+            int kernelWidth = (config.fragShaderType == Reflect) ? textureSupport/2 : textureSupport;
+            
+            for(int y = startIndex; y < textureSupport; y++)
             {
-                for(int x = 0; x < textureSupport; x++)
+                for(int x = startIndex; x < textureSupport; x++)
                 {
                     DoubleComplex interpWeight = interpolated[y * textureSupport + x];
                     FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
-                    int index = (iw * textureSupport * textureSupport) + (y * textureSupport) + x;
+                    int index = (iw * kernelWidth * kernelWidth) + ((y-startIndex) * kernelWidth) + (x-startIndex);
                     wTextures[index] = weight;
                 }
                 
@@ -1085,9 +1103,9 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         memset(shift, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
     }
     
-    if(config.useRadial && plane >= 0)
+    if(config.fragShaderType == Radial && plane >= 0)
     {
-        saveRadialKernelsToFile("output/wproj_%d_radial_%d.csv",convHalf,numWPlanes,wTextures);
+        saveRadialKernelsToFile("output/wproj_%d_radial_%d.csv",textureSupport/2,numWPlanes,wTextures);
     }
     
     free(screen);
@@ -1124,7 +1142,7 @@ void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double 
         phase = 0.0;
         
         nuY = fabs(calcSpheroidalShift(iy, paddedWFullSupport)); 
-        if(!config.useRadial)
+        if(config.fragShaderType != Radial)
             taperY = calcSpheroidalWeight(nuY) * (1.0 - nuY * nuY);
         
         for(int ix = 0; ix < paddedWFullSupport; ix++)
@@ -1136,7 +1154,7 @@ void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double 
 
             nuX = fabs(calcSpheroidalShift(ix, paddedWFullSupport));
             
-            if(config.useRadial)
+            if(config.fragShaderType == Radial)
             {
                 radius = sqrt(nuX * nuX + nuY * nuY);
                 taper = calcSpheroidalWeight(radius) * (1.0 - radius * radius);
