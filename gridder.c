@@ -115,7 +115,7 @@ int windowDisplay;
 // Global gridder configuration
 Config config;
 
-bool COMPARE_TO_ANTHONY = true;
+bool COMPARE_TO_ANTHONY = false;
 
 //CHANGES: - , gridDimension set to 100, 
 // testing 1 visibility only
@@ -149,32 +149,29 @@ void updateTimer(Timer* timer)
     timer->timeCallsProcess = clock();
 }
 
-void initConfig(void) 
+void initConfig(char** argv) 
 {
     // Scale grid dimension down for GUI rendering
-    windowDisplay = 1024;
+    windowDisplay = atoi(argv[1]);
     
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernelTexSize = 1024;
+    config.kernelTexSize = atoi(argv[2]);
+
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
     // due to use of FFT procedure (512 is a good value to use)
-    
-    
-    config.kernelResolutionSize = 1024; // SEEEEETH DONT TOUCH!!!
+    config.kernelResolutionSize = atoi(argv[3]); // SEEEEETH DONT TOUCH!!!
     
     // Single dimension of the grid
-    
-    config.gridDimension = 18000.0f; 
-    
-    config.renderDimension = config.gridDimension;
+    config.gridDimension = atoi(argv[4]); 
+    config.renderDimension = atoi(argv[5]);
     
     // Full support of min/max kernel supported per observation
     // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
-    config.kernelMaxFullSupport = (44.0f * 2.0f) + 1.0f;
-    config.kernelMinFullSupport = (4.0f * 2.0f) + 1.0f;
+    config.kernelMaxFullSupport = (atof(argv[7]) * 2.0f) + 1.0f;
+    config.kernelMinFullSupport = (atof(argv[6]) * 2.0f) + 1.0f;
     
     // Number of visibilities to process (is set when reading visibilities from file)
     // Note: if not reading from file, then must be manually changed.
@@ -245,13 +242,13 @@ void initConfig(void)
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
     
     // MaximuFm W term to support
-    config.wProjectionMaxW = 7083.386050;//19225.322282;//7083.386050;
+    config.wProjectionMaxW = atof(argv[8]);//19225.322282;//7083.386050;
     
     // Cell size radians for observation
-    config.cellSizeRad =  0.00000639708380288949; // 4.848136811095360e-06;
+    config.cellSizeRad =  atof(argv[10]); // 4.848136811095360e-06;
     
     // Number of W planes to create
-    config.wProjectNumPlanes = 339;
+    config.wProjectNumPlanes = atoi(argv[9]);
     
     // Scales W terms (used on GPU to determine w plane index)
     config.wScale = pow((double) config.wProjectNumPlanes-1, 2.0) / config.wProjectionMaxW;
@@ -270,17 +267,30 @@ void initConfig(void)
 }
 
 int main(int argc, char** argv) {            
-    
- 
-    
+
+    // Incorrect number of arguments provided
+    if(argc != 11)
+    {
+        printf(">>> Invalid number of arguments: expecting 10 custom arguments\n")
+        printf(">>> argv[1]  = GUI window size\n");
+        printf(">>> argv[2]  = kernel texture dimension\n");
+        printf(">>> argv[3]  = kernel resolution dimension\n");
+        printf(">>> argv[4]  = grid dimension\n");
+        printf(">>> argv[5]  = render dimension\n");
+        printf(">>> argv[6]  = kernel min support (half)\n");
+        printf(">>> argv[7]  = kernel max support (half)\n");
+        printf(">>> argv[8]  = max w term\n");
+        printf(">>> argv[9]  = number w planes\n");
+        printf(">>> argv[10] = cell size (radians)\n");
+        return EXIT_FAILURE;
+    }
+
+    initConfig(argv); 
+
     initTimer(&gridderTimer);
     
-    // Define mem cleanup function on exit
-    //atexit(cleanup);
-    initConfig();
-    
     srand((unsigned int) time(NULL));
-    setenv("DISPLAY", ":1", 11.0);
+    setenv("DISPLAY", ":0", 11.0);
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
     glutInitWindowSize(windowDisplay, windowDisplay);
@@ -288,7 +298,6 @@ int main(int argc, char** argv) {
     glutCreateWindow("HEC Gridder");
     glutDisplayFunc(runGridder);
     glutTimerFunc(config.refreshDelay, timerEvent, 0);
-    //glewInit();
     glewExperimental = GL_TRUE;
     GLenum err = glewInit();
     if (err != GLEW_OK) {
@@ -297,7 +306,8 @@ int main(int argc, char** argv) {
 
     initGridder();
     glutMainLoop();
-    return (EXIT_SUCCESS);
+
+    return EXIT_SUCCESS;
 }
 
 /*
@@ -460,8 +470,8 @@ void initGridder(void)
     kernalTextureID = idArray[1];
     glBindTexture(KERNEL_DIM, kernalTextureID);
     
-    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_NEAREST); // revert back to linear
-    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_NEAREST); // revert back to linear
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // revert back to linear
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // revert back to linear
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   
@@ -596,7 +606,7 @@ void runGridder(void) {
             // U, V, W, Real, Imaginary, Weight
             visibilities[i] =  -(0.0); // right asc
             visibilities[i + 1] = 0.0;
-            visibilities[i + 2] = 0.0;
+            visibilities[i + 2] = 7083.0;
             visibilities[i + 3] = 1.0;
             visibilities[i + 4] = 0.0;
             visibilities[i + 5] = 1.0f;
@@ -1033,51 +1043,6 @@ void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support)
         kernel[i].imaginary *= scaleFactor;
     }
 }
-
-//void interpolateKernel(DoubleComplex *source, DoubleComplex* dest, int resolutionSupport, int textureSupport)
-//{   
-//    // Perform bicubic interpolation
-//    InterpolationPoint neighbours[16];
-//    InterpolationPoint interpolated[4];
-//    float xShift, yShift;
-//    bool radial = config.fragShaderType == Radial;
-//    
-//    int startIndexX = (radial) ? textureSupport/2 : 0;
-//    int startIndexY = (radial) ? textureSupport/2 : 0;
-//    int endIndexY = (radial) ? (textureSupport/2)+1 : textureSupport;
-//    
-//    for(int y = startIndexY; y < endIndexY; y++)
-//    {
-//        if(config.fragShaderType == Radial)
-//            yShift = 0.0;
-//        else
-//            yShift = calcInterpolateShift((float) y, (float) (textureSupport));
-//        
-//        for(int x = startIndexX; x < textureSupport; x++)
-//        {
-//            //xShift = calcInterpolateShift((float) x, (float) (textureSupport));
-//            
-////            if(x==startIndexX)
-////                xShift = -1.0 + ((2.0 * x) / textureSupport);
-////            else
-//                xShift = -1.0 + ((2.0 * x + 1.0) / textureSupport);
-//            
-//            getBicubicNeighbours(xShift, yShift, neighbours, resolutionSupport, source);
-//            
-//            for(int i  = 0; i < 4; i++)
-//            {
-//                InterpolationPoint newPoint = (InterpolationPoint) {.xShift = xShift, .yShift = neighbours[(i*4)+1].yShift};
-//                newPoint = interpolateCubicWeight(neighbours, newPoint, i*4, resolutionSupport-1, true);
-//                interpolated[i] = newPoint;
-//            }
-//            
-//            InterpolationPoint final = (InterpolationPoint) {.xShift = xShift, .yShift = yShift};
-//            final = interpolateCubicWeight(interpolated, final, 0, resolutionSupport-1, false);
-//            int index = y * textureSupport + x;
-//            dest[index] = (DoubleComplex) {.real = final.weight.real, .imaginary = final.weight.imaginary};
-//        }
-//    }
-//}
 
 /*
  * Function: createWProjectionPlanes 
