@@ -107,7 +107,7 @@ typedef struct Timer {
 /*--------------------------------------------------------------------
 *   FUNCTION DEFINITIONS
 *-------------------------------------------------------------------*/
-void initConfig(void);
+void initConfig(char** argv);
 void initGridder(void);
 void runGridder(void);
 void checkShaderStatus(GLuint shader);
