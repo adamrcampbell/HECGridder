@@ -26,10 +26,6 @@
     #define M_PI 3.14159265358979323846264338327
 #endif
 
-#ifndef InterpThenNormalize
-    #define InterpThenNormalize 1
-#endif
-
 // NAG Dataset configurations
 //
 //  File:           el82-70.txt
@@ -76,7 +72,7 @@ static GLuint visibilityBuffer;
 static GLuint sLocPositionRender;
 static GLuint sProgramRender;
 static GLuint uShaderTextureHandle;
-static GLuint uShaderTextureKernalHandle; 
+static GLuint uShaderTextureKernelHandle; 
 static GLuint uMinSupportOffset;
 static GLuint uWToMaxSupportRatio;
 static GLuint uGridCenter;
@@ -88,12 +84,11 @@ static GLuint uUVScale;
 static GLuint uNumPlanes;
 static GLuint fboID;
 static GLuint textureID;
-static GLuint kernalTextureID;
+static GLuint kernelTextureID;
 static GLuint textureID;
 static GLfloat* gridBuffer;
 static GLenum KERNEL_DIM;
 static FloatComplex* kernelBuffer;
-static GLuint* visibilityIndices;
 static GLfloat* visibilities;
 
 // Used for counting gridding iterations performed
@@ -374,18 +369,9 @@ void initGridder(void)
         }
         else
             printf("NO VISIBILITY FILE\n");
-        
-        //saveVisibilitiesDistribution();
-        
     }
     else
         visibilities = malloc(sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount);
-    
-    visibilityIndices = malloc(sizeof (GLuint) * config.visibilityCount);
-
-    for (GLuint i = 0; i < config.visibilityCount; i++) {
-        visibilityIndices[i] = i;
-    }
     
     GLuint vertexShader;
     
@@ -405,7 +391,7 @@ void initGridder(void)
     sProgram = createProgram(vertexShader, fragmentShader);
     sLocPosition = glGetAttribLocation(sProgram, "position");
     sComplex = glGetAttribLocation(sProgram, "complex");
-    uShaderTextureKernalHandle = glGetUniformLocation(sProgram, "kernalTex");
+    uShaderTextureKernelHandle = glGetUniformLocation(sProgram, "kernelTex");
     uMinSupportOffset = glGetUniformLocation(sProgram, "minSupportOffset");
     uWToMaxSupportRatio = glGetUniformLocation(sProgram, "wToMaxSupportRatio");
     uGridCenter = glGetUniformLocation(sProgram, "gridCenter");
@@ -466,20 +452,18 @@ void initGridder(void)
     }
     createWProjectionPlanes(kernelBuffer);
 
-    //kernal TEXTURE
-    kernalTextureID = idArray[1];
-    glBindTexture(KERNEL_DIM, kernalTextureID);
+    //kernel TEXTURE
+    kernelTextureID = idArray[1];
+    glBindTexture(KERNEL_DIM, kernelTextureID);
     
-    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // revert back to linear
-    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // revert back to linear
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // linear = better precision
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // linear = better precision
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   
     if(config.fragShaderType != Radial)
         glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     
- //   float borderColours[] = {0.0f,0.0f,0.0f,1.0f};
-  //  glTexParameterfv(KERNEL_DIM,GL_TEXTURE_BORDER_COLOR, borderColours);
     glEnable(KERNEL_DIM);
     
     if(config.fragShaderType == Radial)
@@ -495,9 +479,6 @@ void initGridder(void)
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
     glPointParameteri(GL_POINT_SPRITE_COORD_ORIGIN,GL_LOWER_LEFT);
     
-    
-  //  glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
-  //  glEnable(GL_POINT_SMOOTH);
     glEnable(GL_POINT_SPRITE);
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
     
@@ -537,27 +518,6 @@ void initGridder(void)
         printf("\n=====================\n");
     }
  }
-
-void createRadialPlanesTest(FloatComplex *kernel,int totalWidth, int totalHeight)
-{
-    float inc = 1.0f/(float)totalWidth;
-    float inc2 = 1.0f/(float)totalHeight;
-    
-    for(int r = 0; r < totalHeight; r++)
-    {   int c = 0;
-        for(int c = 0; c < totalWidth-1; c++)
-        {
-            kernel[r * totalWidth + c].real = 1.0f - c*inc;   
-            kernel[r * totalWidth + c].imaginary = 1.0 - r*inc2;
-            if(r == 0) 
-                printf("(%.3f, %d) ",  kernel[r * totalWidth + c].real, r * totalWidth + c);
-        }
-        //ensure last value is always 0 for radial values > 1 (ensures Clamps to 0)
-        kernel[r * totalWidth + c].real = 0.0f;
-        kernel[r * totalWidth + c].imaginary = 0.0f;
-        //printf("\n");
-    }
-}
 
 /*
  * Function: setShaderUniforms 
@@ -627,8 +587,8 @@ void runGridder(void) {
     glUseProgram(sProgram);
     glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
     glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
-    glBindTexture(KERNEL_DIM, kernalTextureID);
-    glUniform1i(uShaderTextureKernalHandle, 0);
+    glBindTexture(KERNEL_DIM, kernelTextureID);
+    glUniform1i(uShaderTextureKernelHandle, 0);
     glBindBuffer(GL_ARRAY_BUFFER, visibilityBuffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount, visibilities, GL_STATIC_DRAW);
     glEnableVertexAttribArray(sLocPosition);
@@ -991,34 +951,30 @@ int calcWFullSupport(double w, double wToMaxSupportRatio, double minSupport)
  * returns: nothing
  */
 void normalizeKernel(DoubleComplex *kernel, int resolutionSupport, int textureSupport, int wFullSupport)
-{
-    // Get sum of realSum
-    
-    int iteration =0;
-    
-#if InterpThenNormalize
-    iteration = textureSupport;
-#else
-    iteration = resolutionSupport;
-#endif
-    
-    
+{    
     double realSum = 0.0;
-    for(int r = 0; r < iteration; r++)
-        for(int c = 0; c < iteration; c++)
-            realSum += kernel[r * iteration + c].real;
-    
-    // printf("realSum: %f\n", realSum); 
-    double scaleFactor = pow((double)iteration/(double)wFullSupport, 2.0) / realSum;
-    // printf("scalar: %f\n", scaleFactor); 
-    
-    // Normalize weights
-    for(int r = 0; r < iteration; r++)
-        for(int c = 0; c < iteration; c++)
+    int i = 0;
+
+    for(int r = 0; r < resolutionSupport; r++)
+    {
+        for(int c = 0; c < resolutionSupport; c++)
         {
-            kernel[r * iteration + c].real = (kernel[r * iteration + c].real) * scaleFactor;
-            kernel[r * iteration + c].imaginary = (kernel[r * iteration + c].imaginary) * scaleFactor;
+            i = r * resolutionSupport + c;
+            realSum += kernel[i].real;
         }
+    }
+    
+    double scaleFactor = pow((double) textureSupport / (double) wFullSupport, 2.0) / realSum;
+
+    for(int r = 0; r < resolutionSupport; r++)
+    {
+        for(int c = 0; c < resolutionSupport; c++)
+        {
+            i = r * resolutionSupport + c;
+            kernel[index].real = kernel[index].real * scaleFactor;
+            kernel[index].imaginary = kernel[index].imaginary * scaleFactor;
+        }
+    }
 }
 
 void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support)
@@ -1095,7 +1051,6 @@ void createWProjectionPlanes(FloatComplex *wTextures)
 //        if(iw == plane)
 //            saveKernelToFile("output/wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
             
-#if InterpThenNormalize
         // Interpolate w projection kernel down to texture support dimensions
          DoubleComplex *interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
          interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
@@ -1111,27 +1066,6 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         
 //        if(iw == plane)
 //            saveKernelToFile("output/wproj_%f_normalized_%d_from_%d.csv", w, textureSupport, interpolated); 
-#endif
-         
-#if !InterpThenNormalize
-        
-        // Normalize the kernel
-//        if(config.fragShaderType == Radial)
-//            normalizeKernelRadial(interpolated, textureSupport, wFullSupport);
-//        else
-        normalizeKernel(shift, convolutionSize, textureSupport, wFullSupport);
-        
-       // if(iw == plane)
-       //     saveKernelToFile("output/wproj_%f_normalized_%d_from_%d.csv", w, convolutionSize, shift);  
-         
-        // Interpolate w projection kernel down to texture support dimensions
-         DoubleComplex *interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
-         interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
-         
-        //if(iw == plane)
-         //   saveKernelToFile("output/wproj_%f_after_interpolated_%d_from_%d.csv", w, textureSupport, interpolated);
-        
-#endif
         
         
         // Bind interpolated kernel to texture matrix
@@ -1201,8 +1135,6 @@ void createWProjectionPlanes(FloatComplex *wTextures)
 
 void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double w, double fieldOfView, int wFullSupport)
 {        
-    // TODO: Set flag for anti alias or not
-    
     int resolutionHalfSupport = resolutionFullSupport/2;
     int paddedWFullSupport = wFullSupport;
     int paddedWHalfSupport = paddedWFullSupport/2;
@@ -1216,12 +1148,9 @@ void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double 
         lsq = l*l;
         phase = 0.0;
         
-        // nuY = fabs(calcSpheroidalShift(iy+1, paddedWFullSupport+1)); 
         nuY = fabs(calcAndrewShift(iy, paddedWFullSupport)); 
         if(config.fragShaderType != Radial)
-            taperY = calcSpheroidalWeight(nuY);// * (1.0 - nuY * nuY);
-        
-      // printf("%.10f\n", taperY);
+            taperY = calcSpheroidalWeight(nuY);
         
         for(int ix = 0; ix < paddedWFullSupport; ix++)
         {
@@ -1230,7 +1159,6 @@ void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double 
             index = (iy+(resolutionHalfSupport-paddedWHalfSupport)) * resolutionFullSupport
                     + (ix+(resolutionHalfSupport-paddedWHalfSupport));
 
-            // nuX = fabs(calcSpheroidalShift(ix+1, paddedWFullSupport+1));
             nuX = fabs(calcAndrewShift(ix, paddedWFullSupport));
             
             if(config.fragShaderType == Radial)
@@ -1239,7 +1167,7 @@ void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double 
                 taper = calcSpheroidalWeight(radius) * (1.0 - radius * radius);
             }
             else
-                taper = taperY * calcSpheroidalWeight(nuX);// * (1.0 - nuX * nuX);
+                taper = taperY * calcSpheroidalWeight(nuX);
             
             if(rsq < 1.0)
             {
@@ -1441,123 +1369,6 @@ void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted)
     }
 }
 
-/*
- * Function: interpolateCubicWeight 
- * --------------------
- * Performs a bicubic interpolation on 4 supplied points
- * 
- * points : the 4 points to interpolate against
- * newPoint : the new point produced by the bicubic interpolation
- * start : the starting index of the 4 neighbours to use in the interpolation
- * width : the width of the original block of memory being interpolated from
- * horizontal : a flag to determine if performing a vertical or horizontal interpolation
- * 
- * returns: the newly interpolated weight
- */
-//InterpolationPoint interpolateCubicWeight(InterpolationPoint *points, InterpolationPoint newPoint, int start, int width, bool horizontal)
-//{      
-//    double shiftCubed = pow(getShift(width), 3);
-//
-//    DoubleComplex p0 = (DoubleComplex) {.real = (horizontal) ? points[start+0].xShift : points[start+0].yShift, .imaginary = 0.0};
-//    DoubleComplex p1 = (DoubleComplex) {.real = (horizontal) ? points[start+1].xShift : points[start+1].yShift, .imaginary = 0.0};
-//    DoubleComplex p2 = (DoubleComplex) {.real = (horizontal) ? points[start+2].xShift : points[start+2].yShift, .imaginary = 0.0};
-//    DoubleComplex p3 = (DoubleComplex) {.real = (horizontal) ? points[start+3].xShift : points[start+3].yShift, .imaginary = 0.0};
-//    DoubleComplex interpShift = (DoubleComplex) {.real = (horizontal) ? newPoint.xShift : newPoint.yShift, .imaginary = 0.0};
-//    
-//    DoubleComplex w0 = (DoubleComplex) {.real = -(points[start+0].weight.real) / (6.0 * shiftCubed), 
-//            .imaginary = -(points[start+0].weight.imaginary) / (6.0 * shiftCubed)};
-//    DoubleComplex w1 = (DoubleComplex) {.real = points[start+1].weight.real / (2.0 * shiftCubed),
-//            .imaginary = points[start+1].weight.imaginary / (2.0 * shiftCubed)};
-//    DoubleComplex w2 = (DoubleComplex) {.real = -points[start+2].weight.real / (2.0 * shiftCubed), 
-//            .imaginary = -points[start+2].weight.imaginary / (2.0 * shiftCubed)};
-//    DoubleComplex w3 = (DoubleComplex) {.real = points[start+3].weight.real / (6.0 * shiftCubed), 
-//            .imaginary = points[start+3].weight.imaginary / (6.0 * shiftCubed)}; 
-//    
-//    DoubleComplex t0 = complexMultiply(complexMultiply(complexMultiply(w0, complexSubtract(interpShift, p1)), complexSubtract(interpShift, p2)), 
-//            complexSubtract(interpShift, p3));
-//    DoubleComplex t1 = complexMultiply(complexMultiply(complexMultiply(w1, complexSubtract(interpShift, p0)), complexSubtract(interpShift, p2)), 
-//            complexSubtract(interpShift, p3));
-//    DoubleComplex t2 = complexMultiply(complexMultiply(complexMultiply(w2, complexSubtract(interpShift, p0)), complexSubtract(interpShift, p1)),
-//            complexSubtract(interpShift, p3));
-//    DoubleComplex t3 = complexMultiply(complexMultiply(complexMultiply(w3, complexSubtract(interpShift, p0)), complexSubtract(interpShift, p1)), 
-//            complexSubtract(interpShift, p2));
-//    
-//    newPoint.weight = complexAdd(complexAdd(complexAdd(t0, t1), t2), t3);
-//    return newPoint;
-//}
-
-/*
- * Function: getBicubicNeighbours 
- * --------------------
- * Calculates and stores the 16 elements required to perform a series of bicubic interpolation against
- * 
- * xShift : the x shift position to begin selecting neighbours from (-1.0 to 1.0 inclusive)
- * yShift : the y shift position to begin selecting neighbours from (-1.0 to 1.0 inclusive)
- * neighbours : the memory block for storing the 16 weights located
- * resolutionSupport : the full support of the convolution kernel being used for interpolation
- * matrix : the convolution kernel  
- * 
- * returns: nothing
- */
-//void getBicubicNeighbours(float xShift, float yShift, InterpolationPoint *neighbours, int resolutionSupport, DoubleComplex* matrix)
-//{
-//    // Get x, y from scaled shift 
-//    int scaledPosX = calcRelativeIndex(xShift, resolutionSupport-2)+1;
-//    int scaledPosY = calcRelativeIndex(yShift, resolutionSupport-2)+1;
-//    
-//    // printf("[ X: %d, Y: %d ] \n", scaledPosX, scaledPosY);
-//    
-//    // Get 16 neighbours
-//    for(int r = scaledPosY - 1, i = 0; r < scaledPosY + 3; r++)
-//    {
-//        for(int c = scaledPosX - 1; c < scaledPosX + 3; c++)
-//        {
-//            InterpolationPoint n = (InterpolationPoint) {.xShift = calcResolutionShift(c, resolutionSupport),
-//                .yShift = calcResolutionShift(r, resolutionSupport)};
-//            
-//            if(c < 1 || c >= resolutionSupport || r < 1 || r >= resolutionSupport)
-//            {
-//                n.weight = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};   
-//            }
-//            else
-//            {
-//                n.weight = matrix[r * resolutionSupport + c];
-//            }
-//            
-//            neighbours[i++] = n;
-//            // printf("[R: %d, C: %d, X: %.3f, Y: %.3f]\n", r, c, n.xShift, n.yShift);
-//        }
-//        // printf("\n");
-//    }
-//    // printf("\n\n");
-//}
-
-//void getCubicNeighbours(float xShift, InterpolationPoint *neighbours, int resolutionSupport, DoubleComplex* matrix)
-//{
-//    int scaledPosX = calcRelativeIndex(xShift, resolutionSupport-2)+1;
-//    int index = (resolutionSupport * (resolutionSupport/2));
-//    int i = 0;
-//    
-//    //printf("X Shift: %f, ScaledPosX: %d\n", xShift, scaledPosX);
-//    
-//    for(int c = scaledPosX - 1; c < scaledPosX + 3; c++)
-//    {
-//        InterpolationPoint n = (InterpolationPoint) {.xShift = calcResolutionShift(c, resolutionSupport),
-//            .yShift = 0.0};
-//
-//        if(c < resolutionSupport/2 || c >= resolutionSupport)
-//        {
-//            n.weight = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};   
-//        }
-//        else
-//        {
-//            n.weight = matrix[index + c];
-//        }
-//
-//        neighbours[i++] = n;
-//        //printf("Neighbour @ Col %d: %f+%f \n", c, n.weight.real, n.weight.imaginary);
-//    }
-//}
 
 float calcAndrewShift(int index, int fullSupport)
 {
@@ -1856,108 +1667,6 @@ void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension)
     printf(">>> Comparing grids - COMPLETE\n");
 }
 
-void saveVisibilitiesDistribution(void)
-{
-    printf(">>> Generating visibility distribution data...\n");
-    FILE *file = fopen("output/vis_distribution.csv", "w");
-    int range = (((int)config.kernelMaxFullSupport - (int)config.kernelMinFullSupport) / 2)+1;
-    int distribution[range];
-    
-    printf("Distribution zeroed out\n");
-    for(int i = 0; i < range; i++)
-        distribution[i] = 0;
-    
-    
-    for(int i = 0; i < config.visibilityCount*config.numVisibilityParams; i+= config.numVisibilityParams)
-    {
-        int support = calcWFullSupport(visibilities[i+2], config.wToMaxSupportRatio, config.kernelMinFullSupport);
-        distribution[(int)((support-(int)config.kernelMinFullSupport)/2)]++;
-    }
-    
-    // Output bucketing results to file for LaTeX
-    for(int i = 0; i < range; i++)
-    {
-        fprintf(file, "%d, %d\n", ((int) config.kernelMinFullSupport) + (2*i), distribution[i]);
-    }
-    
-    fclose(file);
-    printf(">>> Distribution data saved to file\n");
-}
-
-void generateHistogramFile(GLfloat *gridA, GLfloat *gridB, int width)
-{
-    printf(">>> Generating histogram data...\n");
-    FILE *magnitude_file = fopen("output/histogram_magnitude.csv", "w");
-    DoubleComplex elementA, elementB, difference;
-    double magnitudeA = 0, magnitudeB = 0;
-    int index = 0;
-    float min = -1;
-    float max = 7;
-    float range = fabs(min-max);
-    float distance = 0.01;
-    int numBuckets = (int) (range / distance);
-    Bucket buckets[numBuckets];
-    
-    // Populate bucket defaults
-    float currentMin = min;
-    for(int i = 0; i < numBuckets; i++)
-    {
-      buckets[i].minValue = currentMin;
-      currentMin += distance;
-      buckets[i].maxValue = currentMin;
-      buckets[i].counter = 0;
-    }
-    
-    // Process each grid cell into appropriate bucket
-    for(int r = 0; r < width; r++)
-    {
-        for(int c = 0; c < width*4; c+=4)
-        {
-            index = (r * width * 4) + c;
-            // Get element
-            elementA = (DoubleComplex) {.real = gridA[index+1], .imaginary = gridA[index+2]};
-            elementB = (DoubleComplex) {.real = gridB[index+1], .imaginary = gridB[index+2]};
-            // Calculate magnitude
-            magnitudeA = sqrt(elementA.real * elementA.real + elementA.imaginary * elementA.imaginary);
-            magnitudeB = sqrt(elementB.real * elementB.real + elementB.imaginary * elementB.imaginary);
-            
-            difference = complexSubtract(elementA, elementB);
-            double magnitudeDiff = sqrt(difference.real * difference.real + difference.imaginary * difference.imaginary);
-            // Not the nicest approach to finding the best bucket...
-            for(int i = 0; i < numBuckets; i++)
-            {
-                if(magnitudeDiff >= buckets[i].minValue && magnitudeDiff < buckets[i].maxValue)
-                {
-                  buckets[i].counter++;
-                  break;
-                }
-            }
-        }
-    }
-    
-    // Output bucketing results to file for LaTeX
-    for(int i = 0; i < numBuckets; i++)
-    {
-        fprintf(magnitude_file, "%f, %d\n", buckets[i].minValue, buckets[i].counter);
-    }
-    
-    fclose(magnitude_file);
-    printf(">>> Histogram data saved to file\n");
-}
-
-void cleanup(void)
-{
-    // Gross memory free logic...
-    printf(">>> Cleaning up memory before exiting...\n");
-    // Ensure all OpenGL operations are wrapped up
-    glFinish();
-    // Free memory
-    if(gridBuffer)        free(gridBuffer);
-    if(visibilities)      free(visibilities);
-    if(visibilityIndices) free(visibilityIndices);
-    if(kernelBuffer)      free(kernelBuffer);
-}
-
 void interpolateKernel(DoubleComplex *source, DoubleComplex *destination, 
     int sourceSupport, int destinationSupport)
 {
@@ -1972,13 +1681,11 @@ void interpolateKernel(DoubleComplex *source, DoubleComplex *destination,
     for(int r = 0; r < destinationSupport; r++)
     {
         // Determine relative shift for interpolation row [-1.0, 1.0]
-        // rowShift = calcSphrShift((double) r, (double) destinationSupport-1);
         rowShift = calcInterpolateShift((float)r, (float)destinationSupport);
         
         for(int c = 0; c < destinationSupport; c++)
         {
             // Determine relative shift for interpolation col [-1.0, 1.0]
-            // colShift = calcSphrShift((double) c, (double) destinationSupport-1);
             colShift = calcInterpolateShift((float)c, (float)destinationSupport);
             
             // gather 16 neighbours

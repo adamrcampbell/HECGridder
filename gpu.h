@@ -105,7 +105,7 @@
 #define FRAGMENT_SHADER_RADIAL " \
   #version 430\n \
   precision highp float; \
-  uniform sampler2D kernalTex;\
+  uniform sampler2D kernelTex;\
   in vec2 fComplex; \
   in float wPlane; \
   in float conjugate; \
@@ -113,7 +113,7 @@
     vec2 coord = 2.0*gl_PointCoord.xy - 1.0;\
     coord *= coord;\
     float radialLookup = clamp(sqrt(coord.x+coord.y),0.0,1.0); \
-    vec2 kernelLookup = texture(kernalTex,vec2(radialLookup,wPlane)).rg; \
+    vec2 kernelLookup = texture(kernelTex,vec2(radialLookup,wPlane)).rg; \
     kernelLookup.g = kernelLookup.g * conjugate;\
     gl_FragColor.ra = kernelLookup.rg; \
     gl_FragColor.gb = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
@@ -123,13 +123,13 @@
 #define FRAGMENT_SHADER_REFLECT " \
   #version 430\n \
   precision highp float; \
-  uniform sampler3D kernalTex;\
+  uniform sampler3D kernelTex;\
   in vec2 fComplex; \
   in float wPlane; \
   in float conjugate; \
   void main() { \
     vec2 coord = abs(2.0*gl_PointCoord.xy - 1.0);\
-    vec2 kernelLookup = texture(kernalTex,vec3(coord.xy,wPlane)).rg; \
+    vec2 kernelLookup = texture(kernelTex,vec3(coord.xy,wPlane)).rg; \
     kernelLookup.g = kernelLookup.g * conjugate;\
     gl_FragColor.ra = kernelLookup.rg; \
     gl_FragColor.gb = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
@@ -139,12 +139,12 @@
 #define FRAGMENT_SHADER " \
   #version 430\n \
   precision highp float; \
-  uniform sampler3D kernalTex;\
+  uniform sampler3D kernelTex;\
   in vec2 fComplex; \
   in float wPlane; \
   in float conjugate; \
   void main() { \
-    vec2 kernelLookup = texture(kernalTex,vec3(gl_PointCoord.xy,wPlane)).rg; \
+    vec2 kernelLookup = texture(kernelTex,vec3(gl_PointCoord.xy,wPlane)).rg; \
     kernelLookup.g = kernelLookup.g * conjugate;\
     gl_FragColor.ra = kernelLookup.rg; \
     gl_FragColor.gb = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
