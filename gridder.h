@@ -158,15 +158,13 @@ DoubleComplex complexConjugateExp(double ph);
 double complexMagnitude(double x, double y);
 DoubleComplex complexScale(DoubleComplex z, double scalar);
 
-void normalizeKernel(DoubleComplex *kernel, int resolutionSupport, int textureSupport, int wFullSupport);
+void normalizeKernel(DoubleComplex *kernel, int textureSupport, int wFullSupport);
 void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support);
 void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension);
 void compareGridsL2Norm(GLfloat *gridA, GLfloat *gridB, int gridDimension);
 void compareGridsAnthonyNorm(GLfloat *gridA, GLfloat *gridB, int gridDimension);
 void loadGridFromFile(GLfloat *grid, int gridDimension);
 void generateHistogramFile(GLfloat *gridA, GLfloat *gridB, int width);
-void saveVisibilitiesDistribution();
-void cleanup(void);
 
 float calcAndrewShift(int index, int fullSupport);
 
