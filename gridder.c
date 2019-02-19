@@ -147,7 +147,7 @@ void updateTimer(Timer* timer)
 void initConfig(char** argv) 
 {
     // Scale grid dimension down for GUI rendering
-    windowDisplay = atoi(argv[1]);
+    windowDisplay = 1024;
     
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
@@ -161,7 +161,7 @@ void initConfig(char** argv)
     
     // Single dimension of the grid
     config.gridDimension = atoi(argv[4]); 
-    config.renderDimension = atoi(argv[5]);
+    config.renderDimension = config.gridDimension;
     
     // Full support of min/max kernel supported per observation
     // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
@@ -176,7 +176,7 @@ void initConfig(char** argv)
     config.visibilitiesFromFile = true;
     
     // Source of visibility data
-    config.visibilitySourceFile = "datasets/el82-70.txt";
+    config.visibilitySourceFile = argv[1];//"datasets/el82-70.txt";
     
     // Scalar value for scaling visibility UVW wavelengths to coordinates
     config.frequencyStartHz = 1.0000e+08;
@@ -194,7 +194,7 @@ void initConfig(char** argv)
     // Flag to specify which fragment shader technique
     // to use when rendering frags
     // Options: FullCube, Reflect, Radial
-    config.fragShaderType = Reflect;
+    config.fragShaderType = atoi(argv[5]);
     
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
     config.numVisibilityParams = 6;
@@ -266,18 +266,24 @@ int main(int argc, char** argv) {
     // Incorrect number of arguments provided
     if(argc != 11)
     {
-        printf(">>> Invalid number of arguments: expecting 10 custom arguments\n")
-        printf(">>> argv[1]  = GUI window size\n");
+        printf(">>> Invalid number of arguments: expecting 10 custom arguments\n");
+        printf(">>> argv[1]  = Visibility source file\n");
         printf(">>> argv[2]  = kernel texture dimension\n");
         printf(">>> argv[3]  = kernel resolution dimension\n");
         printf(">>> argv[4]  = grid dimension\n");
-        printf(">>> argv[5]  = render dimension\n");
+        printf(">>> argv[5]  = fragment shader type (1 = radial, 2 = reflect)\n");
         printf(">>> argv[6]  = kernel min support (half)\n");
         printf(">>> argv[7]  = kernel max support (half)\n");
         printf(">>> argv[8]  = max w term\n");
         printf(">>> argv[9]  = number w planes\n");
         printf(">>> argv[10] = cell size (radians)\n");
         return EXIT_FAILURE;
+    }
+    else
+    {
+        for(int i = 1; i < argc; i++)
+            printf("Argument %d: %s\n", i, argv[i]);
+        printf("\n");
     }
 
     initConfig(argv); 
@@ -683,7 +689,6 @@ void runGridder(void) {
         loadGridFromFile(inputGrid, config.renderDimension);
         compareGridsAnthonyNorm(gridBuffer, inputGrid, config.renderDimension);
         compareGrids(gridBuffer, inputGrid, config.renderDimension);
-        generateHistogramFile(gridBuffer, inputGrid, config.renderDimension);
         free(inputGrid);
     }
     // Terminate program
@@ -950,27 +955,27 @@ int calcWFullSupport(double w, double wToMaxSupportRatio, double minSupport)
  * 
  * returns: nothing
  */
-void normalizeKernel(DoubleComplex *kernel, int resolutionSupport, int textureSupport, int wFullSupport)
+void normalizeKernel(DoubleComplex *kernel, int textureSupport, int wFullSupport)
 {    
     double realSum = 0.0;
-    int i = 0;
+    int index = 0;
 
-    for(int r = 0; r < resolutionSupport; r++)
+    for(int r = 0; r < textureSupport; r++)
     {
-        for(int c = 0; c < resolutionSupport; c++)
+        for(int c = 0; c < textureSupport; c++)
         {
-            i = r * resolutionSupport + c;
-            realSum += kernel[i].real;
+            index = r * textureSupport + c;
+            realSum += kernel[index].real;
         }
     }
     
     double scaleFactor = pow((double) textureSupport / (double) wFullSupport, 2.0) / realSum;
 
-    for(int r = 0; r < resolutionSupport; r++)
+    for(int r = 0; r < textureSupport; r++)
     {
-        for(int c = 0; c < resolutionSupport; c++)
+        for(int c = 0; c < textureSupport; c++)
         {
-            i = r * resolutionSupport + c;
+            index = r * textureSupport + c;
             kernel[index].real = kernel[index].real * scaleFactor;
             kernel[index].imaginary = kernel[index].imaginary * scaleFactor;
         }
@@ -1062,7 +1067,7 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         if(config.fragShaderType == Radial)
             normalizeKernelRadial(interpolated, textureSupport, wFullSupport);
         else
-            normalizeKernel(interpolated, convolutionSize, textureSupport, wFullSupport);
+            normalizeKernel(interpolated, textureSupport, wFullSupport);
         
 //        if(iw == plane)
 //            saveKernelToFile("output/wproj_%f_normalized_%d_from_%d.csv", w, textureSupport, interpolated); 
