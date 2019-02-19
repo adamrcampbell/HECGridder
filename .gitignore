@@ -10,3 +10,4 @@ nbdist/
 datasets/
 output/
 grids/
+.directory
