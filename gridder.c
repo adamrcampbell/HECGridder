@@ -95,54 +95,10 @@ static GLfloat* visibilities;
 int iterationCount = 0;
 int totalDumpsPerformed = 0;
 int teminationDumpCount;
-
-// Used for timing of gridder
-Timer gridderTimer;
-
-//int counter = 0;
-//float sumTimeProcess;
-//struct timeval timeCallsReal;
-//int timeCallsProcess;
-
-
 int windowDisplay;
-
 // Global gridder configuration
 Config config;
-
 bool COMPARE_TO_ANTHONY = false;
-
-//CHANGES: - , gridDimension set to 100, 
-// testing 1 visibility only
-//kernel function now calling new test routine where calloc is called
-//using dummy kernel, kernel dimensions now only use 2.
-
-
-void initTimer(Timer* timer)
-{
-    timer->counter = 0;
-    timer->sumTimeProcess = 0.0f;
-    timer->msecAvg = 0.0f;
-    timer->overallTimeAvg = 0.0f;
-    timer->overallTimeSquareAvg = 0.0f;
-    timer->timetimeAvg = 0.0f;
-    timer->timetimeSquareAvg = 0.0f;
-    timer->totalCount = 0;
-}
-
-void startTimer(Timer* timer)
-{
-    gettimeofday(&(timer->timeCallsReal), 0);
-    timer->timeCallsProcess = clock();
-    gettimeofday(&(timer->timeFunctionReal), 0);
-    timer->timeFunctionProcess = clock();
-}
-
-void updateTimer(Timer* timer)
-{
-    gettimeofday(&(timer->timeCallsReal), 0);
-    timer->timeCallsProcess = clock();
-}
 
 void initConfig(char** argv) 
 {
@@ -209,21 +165,8 @@ void initConfig(char** argv)
     //flag to save resulting grid to file (does this at dump time)
     config.saveGridToFile = true;
     //Name output grids, ignored if above variable false;
-    config.outputGridReal = "output/82-70_HEC_real.csv";
-    config.outputGridImag = "output/82-70_HEC_imag.csv";
-    
-    // Flag if want to compare HEC gridder output to Oxford gridder output (ensure file input locations are defined)
-    // Note: only compares on first iteration, remainder are just processed for timing output and GUI rendering.
-    // Also only can compare the two grids at the same interval as the dump time
-    config.compareToOxfordGrid = false;
-    
-    // Source of Oxford grid output (real component)
-    config.inputGridComparisonReal = "grids/oxford_grid_82-70_real.csv";
-    //config.inputGridComparisonReal = "output/grid_real_highResCube.csv";
-    
-    // Source of Oxford grid output (imaginary component)
-    config.inputGridComparisonImag = "grids/oxford_grid_82-70_imag.csv";
-    //config.inputGridComparisonImag = "output/grid_imag_highResCube.csv";
+    config.outputGridReal = "GriddingOutputs/hec_output_grid_real.csv";
+    config.outputGridImag = "GriddingOutputs/hec_output_grid_imag.csv";
     
     // Used to slow down GUI rendering (milliseconds) - 0 means no delay, 1000 means one second delay
     config.refreshDelay = 0;
@@ -251,11 +194,8 @@ void initConfig(char** argv)
     // Field of view for observation (relies on original grid dimension)
     config.fieldOfView =  config.cellSizeRad * (double) config.gridDimension;
     
-    // Custom variable for scaling the UVScale (used for testing, zooms the GUI rendered visibilities)
-    config.graphicMultiplier = 1.0f;
-    
     // Scales visibility UV coordinates to grid coordinates
-    config.uvScale = (double) config.gridDimension * config.cellSizeRad * config.graphicMultiplier; 
+    config.uvScale = (double) config.gridDimension * config.cellSizeRad; 
     
     // Used to calculate required W full support per w term
     config.wToMaxSupportRatio = ((config.kernelMaxFullSupport - config.kernelMinFullSupport) / config.wProjectionMaxW);
@@ -287,10 +227,7 @@ int main(int argc, char** argv) {
     }
 
     initConfig(argv); 
-
-    initTimer(&gridderTimer);
     
-    srand((unsigned int) time(NULL));
     setenv("DISPLAY", ":0", 11.0);
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
@@ -322,12 +259,10 @@ int main(int argc, char** argv) {
  */
 void initGridder(void) 
 {    
-    
     glClampColorARB(GL_CLAMP_VERTEX_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_READ_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
 
-    srand(time(NULL));
     int size = 4 * config.renderDimension*config.renderDimension;
     gridBuffer = (GLfloat*) malloc(sizeof (GLfloat) * size);
     memset(gridBuffer, 0, size);
@@ -494,37 +429,6 @@ void initGridder(void)
     printf("SEEMS LIKE ITS ALL SET UP FINE??? \n");
 }
 
- void createTestPlanes(FloatComplex *kernelBuffer, int totalWidth, int totalHeight, int totalDepth)
- {  for(int w=0;w<totalDepth;w++)
-    {
-        for(int y = 0; y < totalHeight; y++)
-        {
-            for(int x = 0; x < totalWidth; x++)
-            {
-                int index = (w * totalWidth * totalHeight) + (y * totalWidth) + x;
-                kernelBuffer[index].real = x+10;
-                kernelBuffer[index].imaginary = y+1;
-                
-            }       
-        }
-    } 
- 
- 
-    for(int w=0;w<totalDepth;w++)
-    {
-        for(int y = 0; y < totalHeight; y++)
-        {
-            for(int x = 0; x < totalWidth; x++)
-            {
-                int index = (w * totalWidth * totalHeight) + (y * totalWidth) + x;
-                printf("(%f,%f) ",kernelBuffer[index].real,kernelBuffer[index].imaginary = y);
-            } 
-            printf("\n");
-        }
-        printf("\n=====================\n");
-    }
- }
-
 /*
  * Function: setShaderUniforms 
  * --------------------
@@ -572,7 +476,7 @@ void runGridder(void) {
             // U, V, W, Real, Imaginary, Weight
             visibilities[i] =  -(0.0); // right asc
             visibilities[i + 1] = 0.0;
-            visibilities[i + 2] = 7083.0;
+            visibilities[i + 2] = 0.0;
             visibilities[i + 3] = 1.0;
             visibilities[i + 4] = 0.0;
             visibilities[i + 5] = 1.0f;
@@ -605,12 +509,30 @@ void runGridder(void) {
     // Grid visibilities
     // start gridder timing here
     
-    // Begin timing (CPU)
-    startTimer(&gridderTimer);
+    // Begin OpenGL Timing
+    int done = 0;
+    GLuint64 timerStart, timerEnd;
+    GLuint query[2];
+    glGenQueries(2, query);
+    glQueryCounter(query[0], GL_TIMESTAMP);
     
+    // Execute gridding
     glDrawArrays(GL_POINTS, 0, config.visibilityCount);
     glFinish();
-  
+    
+    // Finish OpenGL Timing
+    glQueryCounter(query[1], GL_TIMESTAMP);
+   
+    // wait until the query results are available
+    while (!done) {
+        glGetQueryObjectiv(query[1], 
+                           GL_QUERY_RESULT_AVAILABLE, 
+                           &done);
+    }
+    // get the query results
+    glGetQueryObjectui64v(query[0], GL_QUERY_RESULT, &timerStart);
+    glGetQueryObjectui64v(query[1], GL_QUERY_RESULT, &timerEnd);
+    printf("Time Elapsed: %f ms\n", (timerEnd - timerStart) / 1000000.0);
     
     for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError()) {
         fprintf(stderr, "%d: %s\n", err, gluErrorString(err));
@@ -675,22 +597,7 @@ void runGridder(void) {
     
     glFinish();
     glutSwapBuffers();
-            
-    gridderTimer.counter++;
-    // Print timing info
-    printTimesAverage(&gridderTimer,"ENTIRE FUNCTION TIME");
-    // Update timer
-    updateTimer(&gridderTimer);
     
-    if(config.compareToOxfordGrid && totalDumpsPerformed == 1 && dumped)
-    {
-        int gridElements = 4 * config.renderDimension * config.renderDimension;
-        GLfloat *inputGrid = (GLfloat*) malloc(sizeof (GLfloat) * gridElements);
-        loadGridFromFile(inputGrid, config.renderDimension);
-        compareGridsAnthonyNorm(gridBuffer, inputGrid, config.renderDimension);
-        compareGrids(gridBuffer, inputGrid, config.renderDimension);
-        free(inputGrid);
-    }
     // Terminate program
     if(totalDumpsPerformed == teminationDumpCount)
         exit(0);
@@ -700,70 +607,6 @@ void timerEvent(int value) {
     glutPostRedisplay();
     glutTimerFunc(config.refreshDelay, timerEvent, 0);
 }
-
-float timedifference_msec(struct timeval t0, struct timeval t1)
-{
-    return (t1.tv_sec - t0.tv_sec) * 1000.0f + (t1.tv_usec - t0.tv_usec) / 1000.0f;
-}
-
-void printTimesAverage(Timer* timer, char description[])
-{
-    int timeTaken =  clock()-timer->timeFunctionProcess;
-    struct timeval realEnd;// = time(0);
-    gettimeofday(&realEnd, 0);
-    
-    float msec = timeTaken * 1000.0f / (float)CLOCKS_PER_SEC;
-    float timetime = timedifference_msec(timer->timeFunctionReal,realEnd);
-    
-    timer->msecAvg+=msec;
-    timer->timetimeAvg +=timetime;
-    timer->overallTimeAvg += timetime;
-    timer->timetimeSquareAvg += (timetime*timetime);
-    timer->overallTimeSquareAvg += (timetime*timetime);
-    if(timer->counter == 1)
-    {    
-        timer->totalCount += timer->counter;
-        float stdDev = (float)sqrt((timer->timetimeSquareAvg/timer->counter)
-            -pow(timer->timetimeAvg/timer->counter,2.0));
-        float stdDevOverall = (float)sqrt((timer->overallTimeSquareAvg/timer->totalCount)
-            -pow(timer->overallTimeAvg/timer->totalCount,2.0));
-        printf("%d> %s :\t Real time Avg = %.3f (%.3f STD), OVERALL time of = %.3f (%.3f STD)\n",
-                timer->totalCount,description,timer->timetimeAvg/timer->counter,
-                stdDev,timer->overallTimeAvg/timer->totalCount,stdDevOverall);
-        timer->msecAvg=0;
-        timer->timetimeAvg =0;
-        timer->timetimeSquareAvg = 0;
-        timer->counter = 0;
-    }
-}
-
-//void printTimesAverage(struct timeval realStart, int processStart, char description[])
-//{
-//    int timeTaken =  clock()-processStart;
-//    struct timeval realEnd;// = time(0);
-//    gettimeofday(&realEnd, 0);
-//    
-//    float msec = timeTaken * 1000.0f / (float)CLOCKS_PER_SEC;
-//    float timetime = timedifference_msec(realStart,realEnd);
-//    
-//    msecAvg+=msec;
-//    timetimeAvg +=timetime;
-//    overallTimeAvg += timetime;
-//    timetimeSquareAvg += (timetime*timetime);
-//    overallTimeSquareAvg += (timetime*timetime);
-//    if(counter == 1)
-//    {    
-//        totalCount += counter;
-//        float stdDev = (float)sqrt((timetimeSquareAvg/counter)-pow(timetimeAvg/counter,2.0));
-//        float stdDevOverall = (float)sqrt((overallTimeSquareAvg/totalCount)-pow(overallTimeAvg/totalCount,2.0));
-//        printf("%d> %s :\t Real time Avg = %.3f (%.3f STD), OVERALL time of = %.3f (%.3f STD)\n",
-//                totalCount,description,timetimeAvg/counter,stdDev,overallTimeAvg/totalCount,stdDevOverall);
-//        msecAvg=0;
-//        timetimeAvg =0;
-//        timetimeSquareAvg = 0;
-//        counter = 0; 
-//    }
-//}
 
 /*
  * Function: checkShaderStatus 
@@ -868,11 +711,6 @@ DoubleComplex complexAdd(DoubleComplex x, DoubleComplex y)
     return z;
 }
 
-double complexMagnitude(double x, double y)
-{
-    return sqrt(x * x + y * y);
-}
-
 /*
  * Function: complexSubtract 
  * --------------------
@@ -907,6 +745,11 @@ DoubleComplex complexMultiply(DoubleComplex x, DoubleComplex y)
     z.real = x.real*y.real - x.imaginary*y.imaginary;
     z.imaginary = x.imaginary*y.real + x.real*y.imaginary;
     return z;
+}
+
+DoubleComplex complexScale(DoubleComplex z, double scalar)
+{
+    return (DoubleComplex) {.real=z.real*scalar, .imaginary=z.imaginary*scalar};
 }
 
 /*
@@ -984,21 +827,26 @@ void normalizeKernel(DoubleComplex *kernel, int textureSupport, int wFullSupport
 
 void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support)
 {
-    int halfRes = resolution/2;
-    int startI = (resolution * halfRes) + halfRes;
-    int endI = startI + halfRes;
-    double realSum = 0.0;
+    int halfResolution = resolution/2;
+    int start = (resolution * halfResolution) + halfResolution;
+    int end = start + halfResolution;
     int r = 0;
-    for(int i = startI; i < endI; i++)
-    {
-        realSum += kernel[i].real * (2.0*M_PI*(r+0.5));
-        r++;
-    }
+    double realSum = 0.0;
+    
+//    for(int i = start; i < end; i++)
+//    {
+//        realSum += kernel[i].real * (2.0*M_PI*(r+0.5));
+//        r++;
+//    }
+    
+    for(int i = start; i < end; ++i)
+        realSum += kernel[i].real * 2.0 * M_PI * ((i - start));      
+        
     
     double scaleFactor = pow((double)resolution/(double)support, 2.0) / realSum;
 
     // Normalize weights
-    for(int i = startI; i < endI; i++)
+    for(int i = start; i < end; i++)
     {
         kernel[i].real *= scaleFactor;
         kernel[i].imaginary *= scaleFactor;
@@ -1093,18 +941,6 @@ void createWProjectionPlanes(FloatComplex *wTextures)
                     wTextures[index].imaginary = 0.0f;
                 } 
             }
-          
-//            int halfPoint = textureSupport*(convHalf)+(convHalf);
-//            for(int i=0;i<convHalf;i++)
-//            {   DoubleComplex interpWeight = interpolated[halfPoint + i];
-//                FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
-//                int index = (iw * convHalf)  + i;
-//                wTextures[index] = weight;
-//                if(i==(convHalf-1))
-//                {   wTextures[index].real = 0.0f;
-//                    wTextures[index].imaginary = 0.0f;
-//                }     
-//            }
         }
         else
         {   
@@ -1129,10 +965,10 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         memset(shift, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
     }
     
-//    if(config.fragShaderType == Radial && plane >= 0)
-//    {
-//        saveRadialKernelsToFile("output/wproj_%d_radial_%d.csv",textureSupport/2,numWPlanes,wTextures);
-//    }
+    if(config.fragShaderType == Radial && plane >= 0)
+    {
+        saveRadialKernelsToFile("output/wproj_%d_radial_%d.csv",textureSupport/2,numWPlanes,wTextures);
+    }
     
     free(screen);
     free(shift);
@@ -1169,7 +1005,7 @@ void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double 
             if(config.fragShaderType == Radial)
             {
                 radius = sqrt(nuX * nuX + nuY * nuY);
-                taper = calcSpheroidalWeight(radius) * (1.0 - radius * radius);
+                taper = calcSpheroidalWeight(radius);
             }
             else
                 taper = taperY * calcSpheroidalWeight(nuX);
@@ -1380,40 +1216,20 @@ float calcAndrewShift(int index, int fullSupport)
     return (index - fullSupport/2) / ((float) fullSupport / 2.0f);
 }
 
-float calcSpheroidalShift(int index, int width)
-{   
-    return -1.0 + index * getShift(width);
-}
-
-float calcResolutionShift(float index, float width)
-{
-    return -1.0 + ((index-1.0) * (2.0 / (width-2.0)));
-}
-
 float calcInterpolateShift(float index, float width)
 {
     return -1.0 + ((2.0 * index + 1.0) / width);
-}
-
-float calcShift(int index, int width, float start)
-{
-    return start + (index * getShift(width));
-}
-
-double getShift(double width)
-{
-    return 2.0/width;
-}
-
-float getStartShift(float width)
-{
-    return -1.0 + (1.0 / width);
 }
 
 int calcRelativeIndex(double x, double width)
 {
     int offset = (x < 0.0) ? 1 : 2;
     return ((int) floor(((x+1.0f)/2.0f) * (width-offset)))+1;
+}
+
+double calcSphrShift(double index, double width)
+{   
+    return -1.0 + index * (2.0/width);
 }
 
 void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data)
@@ -1429,22 +1245,6 @@ void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data)
                 fprintf(file, "%.20f, ", data[r * support + c].real);
         }
         fprintf(file, "\n");
-    }
-    fclose(file);
-    printf("FILE SAVED\n");
-}
-
-void saveHeatmap(char* filename, float w, int support, DoubleComplex* data)
-{
-    char *buffer[100];
-    sprintf(buffer, filename, w, support);
-    FILE *file = fopen(buffer, "w");
-    for(int r = 0; r < support; r++)
-    {
-        for(int c = 0; c < support; c++)
-        {
-            fprintf(file, "%d %d %f\n", r, c, data[r * support + c].real);
-        }
     }
     fclose(file);
     printf("FILE SAVED\n");
@@ -1474,6 +1274,10 @@ void saveGridToFile(int support)
     // Save to file (real portion)
     FILE *file_real = fopen(config.outputGridReal, "w");
     FILE *file_imag = fopen(config.outputGridImag, "w");
+    
+    if(file_real == NULL)
+        printf("File shit is fucked\n");
+    
     double realSum = 0.0, imagSum = 0.0;
     int index = 0;
     //FILE *file_weight = fopen("output/grid_weight.csv", "w");
@@ -1504,172 +1308,6 @@ void saveGridToFile(int support)
     
     printf("RealSum: %.10f, ImagSum: %f\n", realSum, imagSum);
     printf("Grid has been output to file\n");
-}
-
-void loadGridFromFile(GLfloat *grid, int gridDimension)
-{
-    printf(">>> Reading input grid\n");
-    
-    FILE *realFile = fopen(config.inputGridComparisonReal, "r");
-    FILE *imagFile = fopen(config.inputGridComparisonImag, "r");
-    
-    if(!realFile || !imagFile)
-        printf("FAIL!!! Couldnt load grid files\n");
-    
-    int index = 0, counter = 0;
-    float real = -1.0, imaginary = -1.0;
-    float rMin = 100000.0, rMax = 0.0, iMin = 100000.0, iMax = 0.0;
-    
-    for(int r = 0; r < gridDimension; r++)
-    {
-        for(int c = 0; c < gridDimension * 4; c+=4)
-        {
-            index = (r * gridDimension * 4) + c;
-            fscanf(realFile, "%f, ", &real);
-            fscanf(imagFile, "%f, ", &imaginary);
-            grid[index+1] = real;
-            grid[index+2] = imaginary;
-            
-            if(real < rMin)
-                rMin = real;
-            if(real > rMax)
-                rMax = real;
-
-            if(imaginary < iMin)
-                iMin = imaginary;
-            if(imaginary > iMax)
-                iMax = imaginary;
-            
-            counter++;
-        }
-    }
-    
-    printf("Total elements found: %d\n", counter);
-    
-    printf("rMin: %f, rMax: %f, iMin: %f, iMax: %f\n", rMin, rMax, iMin, iMax);
-    
-    fclose(realFile);
-    fclose(imagFile);
-     
-    printf(">>> Reading input grid - COMPLETE\n");
-}
-
-void compareGridsL2Norm(GLfloat *gridA, GLfloat *gridB, int gridDimension)
-{
-    printf(">>> Comparing grids using L2 norm\n");
-    
-    int counter = 0, index = 0;
-    double difference = 0.0;
-    double r1, r2, i1, i2;
-    
-    for(int r = 0; r < gridDimension; r++)
-    {
-        for(int c = 0; c < gridDimension*4; c+=4)
-        {
-            index = (r * gridDimension * 4) + c;
-            r1 = gridA[index+1];
-            i1 = gridA[index+2];
-            r2 = gridB[index+1];
-            i2 = gridB[index+2];
-            
-            if(complexMagnitude(r1, i1) > 0.0 || complexMagnitude(r2, i2) > 0.0)
-            {
-                difference += complexMagnitude(r1-r2, i1-i2);
-                counter++;
-            }
-        }
-    }
-    
-    // Could technically cause divide by zero error
-    printf("Difference (L2 Norm): %f\n\n", difference/counter);
-}
-
-void compareGridsAnthonyNorm(GLfloat *gridA, GLfloat *gridB, int gridDimension)
-{
-    printf(">>> Comparing grids using Anthony L2 norm\n");
-    
-    int index = 0;
-    double difference = 0.0, gridBNorm = 0.0;
-    double realDiff, imagDiff;
-    
-    for(int r = 0; r < gridDimension; r++)
-    {
-        for(int c = 0; c < gridDimension*4; c+=4)
-        {
-            index = (r * gridDimension * 4) + c;
-            realDiff = gridA[index+1]-gridB[index+1];
-            imagDiff = gridA[index+2]-gridB[index+2];
-            
-            difference += (realDiff * realDiff + imagDiff * imagDiff);
-            gridBNorm += (gridB[index+1] * gridB[index+1] + gridB[index+2] * gridB[index+2]);
-        }
-    }
-    
-    difference = sqrt(difference);
-    gridBNorm = sqrt(gridBNorm);
-    
-    // Could technically cause divide by zero error
-    printf("Difference (Anthony L2 Norm): %f\n\n", difference/gridBNorm);
-}
-
-void compareGrids(GLfloat *gridA, GLfloat *gridB, int gridDimension)
-{
-    printf(">>> Comparing grids\n");
-    
-    int counter = 0, index = 0;
-    float sum = 0.0, maxDistance = 0.0, rDiff = 0.0, iDiff = 0.0, distance = 0.0;
-    float rMin = 100000.0, rMax = 0.0, iMin = 100000.0, iMax = 0.0;
-    float realSumHEC = 0.0, imagSumHEC = 0.0, realSumNAG = 0.0, imagSumNAG = 0.0;
-    
-    for(int r = 0; r < gridDimension; r++)
-    {
-        for(int c = 0; c < gridDimension*4; c+=4)
-        {
-            index = (r * gridDimension * 4) + c;
-            
-            // Accumulate sums
-            realSumHEC += (gridA[index+1]);
-            imagSumHEC += (gridA[index+2]);
-            realSumNAG += (gridB[index+1]);
-            imagSumNAG += (gridB[index+2]);
-            
-            if(gridA[index+1] < rMin)
-                rMin = gridA[index+1];
-            if(gridA[index+1] > rMax)
-                rMax = gridA[index+1];
-
-            if(gridA[index+2] < iMin)
-                iMin = gridA[index+2];
-            if(gridA[index+2] > iMax)
-                iMax = gridA[index+2];
-            
-            
-            if(complexMagnitude(gridA[index+1], gridA[index+2]) > 0.0 || complexMagnitude(gridB[index+1], gridB[index+2]) > 0.0)
-            {
-                rDiff = gridA[index+1] - gridB[index+1];
-                iDiff = gridA[index+2] - gridB[index+2];
-                
-                distance = (rDiff * rDiff) + (iDiff * iDiff);
-                
-                if(distance > maxDistance)
-                    maxDistance = distance;
-                
-                sum += distance;
-                counter++;
-            }
-        }
-    }
- 
-    printf("rMin: %f, rMax: %f, iMin: %f, iMax: %f\n", rMin, rMax, iMin, iMax);
-    printf("Sum: %f, Counter: %d, Max Distance: %f\n", sum, counter, maxDistance);
-    printf("Sum of difference (visibilities): %f\n", sum / config.visibilityCount);
-    sum /= counter;
-    printf("Sum of difference: %f\n\n", sum);
-    printf("HEC Real: %f, HEC Imag: %f\n", realSumHEC, imagSumHEC);
-    printf("NAG Real: %f, NAG Imag: %f\n", realSumNAG, imagSumNAG);
-    printf("Diff Real: %f, Diff Imag: %f\n\n", fabsf(realSumHEC-realSumNAG), fabsf(imagSumHEC-imagSumNAG));
-    
-    printf(">>> Comparing grids - COMPLETE\n");
 }
 
 void interpolateKernel(DoubleComplex *source, DoubleComplex *destination, 
@@ -1763,14 +1401,3 @@ DoubleComplex interpolateSample(DoubleComplex z0, DoubleComplex z1,
     
     return z;
 }
-
-DoubleComplex complexScale(DoubleComplex z, double scalar)
-{
-    return (DoubleComplex) {.real=z.real*scalar, .imaginary=z.imaginary*scalar};
-}
-
-double calcSphrShift(double index, double width)
-{   
-    return -1.0 + index * (2.0/width);
-}
-
