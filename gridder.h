@@ -66,7 +66,12 @@ typedef struct DoubleComplex {
     double imaginary;
 } DoubleComplex;
 
-
+typedef struct Timer {
+    double accumulatedTimeMS;
+    double currentAvgTimeMS;
+    double sumOfSquareDiffTimeMS;
+    int iterations;
+} Timer;
 /*--------------------------------------------------------------------
 *   FUNCTION DEFINITIONS
 *-------------------------------------------------------------------*/
@@ -143,5 +148,7 @@ void normalizeKernel(DoubleComplex *kernel, int textureSupport,
 void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support);
 
 float calcAndrewShift(int index, int fullSupport);
+
+void saveGriddingStats(char *filename);
 
 #endif /* GRIDDER_H */

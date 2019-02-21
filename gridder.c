@@ -21,6 +21,7 @@
 
 #include "gridder.h"
 #include "gpu.h"
+#include "gridder.h"
 
 #ifndef M_PI
     #define M_PI 3.14159265358979323846264338327
@@ -99,6 +100,8 @@ int windowDisplay;
 // Global gridder configuration
 Config config;
 bool COMPARE_TO_ANTHONY = false;
+Timer timer;
+char* timingOutputFile;
 
 void initConfig(char** argv) 
 {
@@ -145,7 +148,7 @@ void initConfig(char** argv)
     // Note: slows down gridding a batch of visibilities, but improves precision
     config.useHeavyInterpolation = true;
     
-    config.accumulateMode = true;
+    config.accumulateMode = false;
     
     // Flag to specify which fragment shader technique
     // to use when rendering frags
@@ -156,7 +159,7 @@ void initConfig(char** argv)
     config.numVisibilityParams = 6;
     
     // Number of gridding iterations to perform before terminating (all visibilities convolved each iteration)
-    config.displayDumpTime = 1;
+    config.displayDumpTime = 100;
     
     // variable used to control when the Gridder will exit after reaching the dump count, 
     // use a negative value to keep "infinite" gridding. 
@@ -199,12 +202,19 @@ void initConfig(char** argv)
     
     // Used to calculate required W full support per w term
     config.wToMaxSupportRatio = ((config.kernelMaxFullSupport - config.kernelMinFullSupport) / config.wProjectionMaxW);
+    
+    timer.accumulatedTimeMS     = 0.0;
+    timer.currentAvgTimeMS      = 0.0;
+    timer.sumOfSquareDiffTimeMS = 0.0;
+    timer.iterations            = 0;
+    timingOutputFile = argv[11];
+    
 }
 
 int main(int argc, char** argv) {            
 
     // Incorrect number of arguments provided
-    if(argc != 11)
+    if(argc != 12)
     {
         printf(">>> Invalid number of arguments: expecting 10 custom arguments\n");
         printf(">>> argv[1]  = Visibility source file\n");
@@ -217,6 +227,7 @@ int main(int argc, char** argv) {
         printf(">>> argv[8]  = max w term\n");
         printf(">>> argv[9]  = number w planes\n");
         printf(">>> argv[10] = cell size (radians)\n");
+        printf(">>> argv[11] = configuration timing file\n");
         return EXIT_FAILURE;
     }
     else
@@ -532,7 +543,16 @@ void runGridder(void) {
     // get the query results
     glGetQueryObjectui64v(query[0], GL_QUERY_RESULT, &timerStart);
     glGetQueryObjectui64v(query[1], GL_QUERY_RESULT, &timerEnd);
-    printf("Time Elapsed: %f ms\n", (timerEnd - timerStart) / 1000000.0);
+    
+    
+    double msTime = (timerEnd - timerStart) / 1000000.0;
+    timer.accumulatedTimeMS += msTime;
+    timer.iterations++;
+    timer.currentAvgTimeMS = timer.accumulatedTimeMS / timer.iterations;
+    timer.sumOfSquareDiffTimeMS += pow(msTime - timer.currentAvgTimeMS, 2.0);
+    printf("%d) Time Elapsed: %f ms\n", timer.iterations, msTime);
+    
+    
     
     for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError()) {
         fprintf(stderr, "%d: %s\n", err, gluErrorString(err));
@@ -600,7 +620,9 @@ void runGridder(void) {
     
     // Terminate program
     if(totalDumpsPerformed == teminationDumpCount)
+    {   saveGriddingStats(timingOutputFile);
         exit(0);
+    }
 }
 
 void timerEvent(int value) {
@@ -1400,4 +1422,29 @@ DoubleComplex interpolateSample(DoubleComplex z0, DoubleComplex z1,
     z = complexAdd(z, complexScale(z3, scale3));
     
     return z;
+}
+
+void saveGriddingStats(char *filename)
+{
+    FILE *f = fopen(filename, "w");
+    
+    if(f != NULL)
+    {
+        fprintf(f, ">>> Gridding Statistics <<<\n");
+        fprintf(f, "Grid Dimension: %d\n", config.gridDimension);
+        fprintf(f, "Render Dimension: %d\n", config.renderDimension);
+        fprintf(f, "Texture Dimension: %d\n", config.kernelTexSize);
+        fprintf(f, "Resolution Dimension: %d\n", config.kernelResolutionSize);
+        fprintf(f, "Cell Size Rads: %.15f\n", config.cellSizeRad);
+        fprintf(f, "Max W: %.15f\n", config.wProjectionMaxW);
+        fprintf(f, "W Scale: %.15f\n", config.wScale);
+        fprintf(f, "Kernel Min Support: %f\n", config.kernelMinFullSupport);
+        fprintf(f, "Kernel Max Support: %f\n", config.kernelMaxFullSupport);
+        fprintf(f, "Average Gridding Time: %f\n", ((double)timer.accumulatedTimeMS/timer.iterations));
+        fprintf(f, "STDev Gridding Time: %f\n", sqrt(timer.sumOfSquareDiffTimeMS/(timer.iterations-1)));
+        fclose(f);
+        printf(">>> SUcCESS: Gridding stats saved to file\n");
+    }
+    else
+        printf(">>> ERR: Unable to save gridding stats to file\n");
 }
