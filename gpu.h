@@ -48,9 +48,7 @@
      gl_PointSize = wSupport + (1.0 - mod(wSupport, 2.0));\
      fComplex = complex.rg * complex.b; \
   }"
-///gl_Position.rg = ((position.rg*uvScale) / gridCenter) + gridCenterOffset; 
-//wSupport + (1.0 - mod(wSupport, 2.0))
-//wPlane = sqrt(abs(position.b*wScale)) * wStep; 
+
 /*
  * Shader Program: VERTEX_SHADER_SNAP (invoked once per bound visibility)
  * --------------------
@@ -151,9 +149,6 @@
                                  kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
   }"
 
-
-//    gl_FragColor.ra = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
-//                                 kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
 // Performs rendering to screen (not gridding)
 #define FRAGMENT_SHADER_RENDER " \
   #version 430\n \
