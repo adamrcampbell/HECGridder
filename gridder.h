@@ -33,6 +33,7 @@ typedef struct Config {
     bool useHeavyInterpolation;
     bool accumulateMode;
     bool saveGridToFile;
+    unsigned int numVectorElements;
 
     // GUI
     unsigned int refreshDelay;
