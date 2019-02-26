@@ -157,11 +157,13 @@ void initConfig(char** argv)
     // Options: FullCube, Reflect, Radial
     config.fragShaderType = atoi(argv[5]);
     
+    config.interpolateTextures = atoi(argv[12]);
+    
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
     config.numVisibilityParams = 6;
     
     // Number of gridding iterations to perform before terminating (all visibilities convolved each iteration)
-    config.displayDumpTime = 5;
+    config.displayDumpTime = 50;
     
     // variable used to control when the Gridder will exit after reaching the dump count, 
     // use a negative value to keep "infinite" gridding. 
@@ -216,7 +218,7 @@ void initConfig(char** argv)
 int main(int argc, char** argv) {            
 
     // Incorrect number of arguments provided
-    if(argc != 12)
+    if(argc != 13)
     {
         printf(">>> Invalid number of arguments: expecting 10 custom arguments\n");
         printf(">>> argv[1]  = Visibility source file\n");
@@ -230,6 +232,7 @@ int main(int argc, char** argv) {
         printf(">>> argv[9]  = number w planes\n");
         printf(">>> argv[10] = cell size (radians)\n");
         printf(">>> argv[11] = configuration timing file\n");
+        printf(">>> argv[12] = enable texture interpolation (0 = false, 1 = true)\n");
         return EXIT_FAILURE;
     }
     else
@@ -419,8 +422,15 @@ void initGridder(void)
     kernelTextureID = idArray[1];
     glBindTexture(KERNEL_DIM, kernelTextureID);
     
-    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // linear = better precision
-    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // linear = better precision
+    GLfloat samplingMethod = (config.interpolateTextures == 0) ? GL_NEAREST : GL_LINEAR;
+    
+    if(config.interpolateTextures == 0)
+        printf(">>> Using GL_NEAREST for textures...\n");
+    else
+        printf(">>> Using GL_LINEAR for textures...\n");
+    
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, samplingMethod); // linear = better precision
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, samplingMethod); // linear = better precision
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   
@@ -1448,6 +1458,7 @@ void saveGriddingStats(char *filename)
         fprintf(f, "W Scale: %.15f\n", config.wScale);
         fprintf(f, "Kernel Min Support: %f\n", config.kernelMinFullSupport);
         fprintf(f, "Kernel Max Support: %f\n", config.kernelMaxFullSupport);
+        fprintf(f, "Texture interpolation: %d\n", config.interpolateTextures);
         fprintf(f, "Average Gridding Time: %f\n", ((double)timer.accumulatedTimeMS/timer.iterations));
         fprintf(f, "STDev Gridding Time: %f\n", sqrt(timer.sumOfSquareDiffTimeMS/(timer.iterations-1)));
         fclose(f);
