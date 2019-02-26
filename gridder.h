@@ -13,7 +13,7 @@
 /*--------------------------------------------------------------------
 *   ENUMERATION
 *-------------------------------------------------------------------*/
-enum FragShaderType{FullCube = 0, Radial = 1, Reflect = 2};
+enum FragShaderType {FullCube = 0, Radial = 1, Reflect = 2};
 /*--------------------------------------------------------------------
 *   STRUCTS
 *-------------------------------------------------------------------*/
@@ -33,6 +33,7 @@ typedef struct Config {
     bool useHeavyInterpolation;
     bool accumulateMode;
     bool saveGridToFile;
+    unsigned int numVectorElements;
 
     // GUI
     unsigned int refreshDelay;
@@ -53,6 +54,7 @@ typedef struct Config {
     char* outputGridImag;
     
     enum FragShaderType fragShaderType;
+    unsigned int interpolateTextures;
     
 } Config;
 

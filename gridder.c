@@ -150,16 +150,20 @@ void initConfig(char** argv)
     
     config.accumulateMode = false;
     
+    config.numVectorElements = 2;
+    
     // Flag to specify which fragment shader technique
     // to use when rendering frags
     // Options: FullCube, Reflect, Radial
     config.fragShaderType = atoi(argv[5]);
     
+    config.interpolateTextures = atoi(argv[12]);
+    
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
     config.numVisibilityParams = 6;
     
     // Number of gridding iterations to perform before terminating (all visibilities convolved each iteration)
-    config.displayDumpTime = 100;
+    config.displayDumpTime = 50;
     
     // variable used to control when the Gridder will exit after reaching the dump count, 
     // use a negative value to keep "infinite" gridding. 
@@ -214,7 +218,7 @@ void initConfig(char** argv)
 int main(int argc, char** argv) {            
 
     // Incorrect number of arguments provided
-    if(argc != 12)
+    if(argc != 13)
     {
         printf(">>> Invalid number of arguments: expecting 10 custom arguments\n");
         printf(">>> argv[1]  = Visibility source file\n");
@@ -228,6 +232,7 @@ int main(int argc, char** argv) {
         printf(">>> argv[9]  = number w planes\n");
         printf(">>> argv[10] = cell size (radians)\n");
         printf(">>> argv[11] = configuration timing file\n");
+        printf(">>> argv[12] = enable texture interpolation (0 = false, 1 = true)\n");
         return EXIT_FAILURE;
     }
     else
@@ -274,7 +279,7 @@ void initGridder(void)
     glClampColorARB(GL_CLAMP_READ_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
 
-    int size = 4 * config.renderDimension*config.renderDimension;
+    int size = config.numVectorElements * config.renderDimension*config.renderDimension;
     gridBuffer = (GLfloat*) malloc(sizeof (GLfloat) * size);
     memset(gridBuffer, 0, size);
 
@@ -336,7 +341,11 @@ void initGridder(void)
     if(config.fragShaderType == Radial)
         fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_RADIAL);
     else if(config.fragShaderType == Reflect)
-        fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_REFLECT);
+    {
+        char *fragmentReflectVec = (config.numVectorElements == 2)
+            ? FRAGMENT_SHADER_REFLECT_VEC2 : FRAGMENT_SHADER_REFLECT_VEC4; 
+        fragmentShader = createShader(GL_FRAGMENT_SHADER, fragmentReflectVec);
+    }
     else
         fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
     
@@ -375,7 +384,12 @@ void initGridder(void)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_2D);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, config.renderDimension, config.renderDimension, 0, GL_RGBA, GL_FLOAT, gridBuffer);
+    
+    GLint gridInternalFormat = (config.numVectorElements == 2) ? GL_RG32F : GL_RGBA32F;
+    GLenum gridVectorElements = (config.numVectorElements == 2) ? GL_RG : GL_RGBA;
+    
+    glTexImage2D(GL_TEXTURE_2D, 0, gridInternalFormat, config.renderDimension, config.renderDimension,
+            0, gridVectorElements, GL_FLOAT, gridBuffer);
 
     glGenFramebuffers(1, idArray);
     fboID = idArray[0];
@@ -408,8 +422,15 @@ void initGridder(void)
     kernelTextureID = idArray[1];
     glBindTexture(KERNEL_DIM, kernelTextureID);
     
-    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // linear = better precision
-    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // linear = better precision
+    GLfloat samplingMethod = (config.interpolateTextures == 0) ? GL_NEAREST : GL_LINEAR;
+    
+    if(config.interpolateTextures == 0)
+        printf(">>> Using GL_NEAREST for textures...\n");
+    else
+        printf(">>> Using GL_LINEAR for textures...\n");
+    
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MIN_FILTER, samplingMethod); // linear = better precision
+    glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, samplingMethod); // linear = better precision
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   
@@ -425,12 +446,9 @@ void initGridder(void)
     else
         glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize, config.kernelTexSize, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
 
-    glBindTexture(KERNEL_DIM, 0);
-    
-    
+    glBindTexture(KERNEL_DIM, 0);    
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
     glPointParameteri(GL_POINT_SPRITE_COORD_ORIGIN,GL_LOWER_LEFT);
-    
     glEnable(GL_POINT_SPRITE);
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
     
@@ -517,9 +535,6 @@ void runGridder(void) {
     glEnableVertexAttribArray(sComplex);
     glVertexAttribPointer(sComplex, 3, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), (void*) (3*sizeof(GLfloat)));
     
-    // Grid visibilities
-    // start gridder timing here
-    
     // Begin OpenGL Timing
     int done = 0;
     GLuint64 timerStart, timerEnd;
@@ -597,9 +612,12 @@ void runGridder(void) {
         glBindFramebuffer(GL_FRAMEBUFFER, fboID);
         iterationCount = 0;
         
+        GLenum gridDataFormat = (config.numVectorElements == 2) ? GL_RG : GL_RGBA;
+        
         // Ensure OpenGL has finished
         glFinish();
-        glReadPixels(0, 0, config.renderDimension, config.renderDimension,  GL_RGBA, GL_FLOAT, gridBuffer);
+        glReadPixels(0, 0, config.renderDimension, config.renderDimension,  gridDataFormat,
+                GL_FLOAT, gridBuffer);
         glFinish();
         
         // This function can be used if you wish to save the gridder results to file
@@ -1297,28 +1315,28 @@ void saveGridToFile(int support)
     FILE *file_real = fopen(config.outputGridReal, "w");
     FILE *file_imag = fopen(config.outputGridImag, "w");
     
-    if(file_real == NULL)
-        printf("File shit is fucked\n");
+    int gridRealIndex = (config.numVectorElements == 2) ? 0 : 1;
+    int gridImagIndex = (config.numVectorElements == 2) ? 1 : 2;
     
     double realSum = 0.0, imagSum = 0.0;
     int index = 0;
     //FILE *file_weight = fopen("output/grid_weight.csv", "w");
     for(int r = 0; r < config.renderDimension; r++)
     {
-        for(int c = 0; c < config.renderDimension*4; c+=4)
+        for(int c = 0; c < config.renderDimension * config.numVectorElements; c += config.numVectorElements)
         {   
-            index = (r * ((int) config.renderDimension) * 4) + c;
+            index = (r * ((int) config.renderDimension) * config.numVectorElements) + c;
             //fprintf(file_weight, "%+f, ", gridBuffer[(r*(int)config.renderDimension*4)+c]);
-            if(c < (config.renderDimension*4 - 4))
-            {   fprintf(file_real, "%.15f,", gridBuffer[index+1]);
-                fprintf(file_imag, "%.15f,", gridBuffer[index+2]);
+            if(c < (config.renderDimension * config.numVectorElements - config.numVectorElements))
+            {   fprintf(file_real, "%.15f,", gridBuffer[index+gridRealIndex]);
+                fprintf(file_imag, "%.15f,", gridBuffer[index+gridImagIndex]);
             }
             else
-            {   fprintf(file_real, "%.15f", gridBuffer[index+1]);
-                fprintf(file_imag, "%.15f", gridBuffer[index+2]); 
+            {   fprintf(file_real, "%.15f", gridBuffer[index+gridRealIndex]);
+                fprintf(file_imag, "%.15f", gridBuffer[index+gridImagIndex]); 
             }
-            realSum += gridBuffer[index+1];
-            imagSum += gridBuffer[index+2];
+            realSum += gridBuffer[index+gridRealIndex];
+            imagSum += gridBuffer[index+gridImagIndex];
         }
         fprintf(file_real, "\n");
         fprintf(file_imag, "\n");
@@ -1440,6 +1458,7 @@ void saveGriddingStats(char *filename)
         fprintf(f, "W Scale: %.15f\n", config.wScale);
         fprintf(f, "Kernel Min Support: %f\n", config.kernelMinFullSupport);
         fprintf(f, "Kernel Max Support: %f\n", config.kernelMaxFullSupport);
+        fprintf(f, "Texture interpolation: %d\n", config.interpolateTextures);
         fprintf(f, "Average Gridding Time: %f\n", ((double)timer.accumulatedTimeMS/timer.iterations));
         fprintf(f, "STDev Gridding Time: %f\n", sqrt(timer.sumOfSquareDiffTimeMS/(timer.iterations-1)));
         fclose(f);

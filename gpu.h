@@ -118,7 +118,22 @@
                                 kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
   }"
 
-#define FRAGMENT_SHADER_REFLECT " \
+#define FRAGMENT_SHADER_REFLECT_VEC2 " \
+  #version 430\n \
+  precision highp float; \
+  uniform sampler3D kernelTex;\
+  in vec2 fComplex; \
+  in float wPlane; \
+  in float conjugate; \
+  void main() { \
+    vec2 coord = abs(2.0*gl_PointCoord.xy - 1.0);\
+    vec2 kernelLookup = texture(kernelTex,vec3(coord.xy,wPlane)).rg; \
+    kernelLookup.g = kernelLookup.g * conjugate;\
+    gl_FragColor.rg = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
+                                kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
+  }"
+
+#define FRAGMENT_SHADER_REFLECT_VEC4 " \
   #version 430\n \
   precision highp float; \
   uniform sampler3D kernelTex;\
