@@ -7,10 +7,6 @@
       <itemPath>gpu.h</itemPath>
       <itemPath>gridder.h</itemPath>
     </logicalFolder>
-    <logicalFolder name="ResourceFiles"
-                   displayName="Resource Files"
-                   projectFiles="true">
-    </logicalFolder>
     <logicalFolder name="SourceFiles"
                    displayName="Source Files"
                    projectFiles="true">
@@ -39,7 +35,7 @@
       <compileType>
         <cTool>
           <standard>10</standard>
-          <commandLine>-Wall -Wstrict-prototypes -ansi -pedantic</commandLine>
+          <commandLine>-Wall -Wstrict-prototypes -ansi -pedantic -O3</commandLine>
         </cTool>
         <linkerTool>
           <linkerLibItems>

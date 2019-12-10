@@ -21,6 +21,7 @@ typedef struct Config {
     // General
     unsigned int gridDimension;
     unsigned int renderDimension;
+    unsigned int imageSize;
     unsigned int kernelTexSize;
     unsigned int kernelResolutionSize;
     float kernelMaxFullSupport;
@@ -111,7 +112,7 @@ void calcBitReversedIndices(int n, int* indices);
 
 void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted);
 
-float calcInterpolateShift(float index, float width);
+double calcInterpolateShift(double index, double width);
 
 void saveKernelToFile(char* filename, float w, int support, 
         DoubleComplex* data);
@@ -149,8 +150,11 @@ void normalizeKernel(DoubleComplex *kernel, int textureSupport,
 
 void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support);
 
-float calcAndrewShift(int index, int fullSupport);
+double calcAndrewShift(int index, int fullSupport);
 
 void saveGriddingStats(char *filename);
+
+void createPhaseScreenNew(int iw, int full_support, int conv_size, 
+    double sampling, double w_scale, DoubleComplex *screen);
 
 #endif /* GRIDDER_H */

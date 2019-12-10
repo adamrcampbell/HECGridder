@@ -27,6 +27,10 @@
     #define M_PI 3.14159265358979323846264338327
 #endif
 
+#ifndef SPEED_OF_LIGHT
+    #define SPEED_OF_LIGHT 299792458.0
+#endif
+
 // NAG Dataset configurations
 //
 //  File:           el82-70.txt
@@ -111,34 +115,36 @@ void initConfig(char** argv)
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernelTexSize = atoi(argv[2]);
+    config.kernelTexSize = 128;
 
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
     // due to use of FFT procedure (512 is a good value to use)
-    config.kernelResolutionSize = atoi(argv[3]); // SEEEEETH DONT TOUCH!!!
+    config.kernelResolutionSize = 4096;
     
     // Single dimension of the grid
-    config.gridDimension = atoi(argv[4]); 
-    config.renderDimension = config.gridDimension;
+    config.gridDimension = 2458; //2048;
+    config.renderDimension = 16;
+    config.imageSize = config.gridDimension;
+    
     
     // Full support of min/max kernel supported per observation
     // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
-    config.kernelMaxFullSupport = (atof(argv[7]) * 2.0f) + 1.0f;
-    config.kernelMinFullSupport = (atof(argv[6]) * 2.0f) + 1.0f;
+    config.kernelMinFullSupport = (4.0f * 2.0f) + 1.0f;
+    config.kernelMaxFullSupport = (4.0f * 2.0f) + 1.0f;
     
     // Number of visibilities to process (is set when reading visibilities from file)
     // Note: if not reading from file, then must be manually changed.
     config.visibilityCount = 1;
     
     // Flag to determine if reading visibilities from a source file
-    config.visibilitiesFromFile = true;
+    config.visibilitiesFromFile = false;
     
     // Source of visibility data
-    config.visibilitySourceFile = argv[1];//"datasets/el82-70.txt";
+    config.visibilitySourceFile = "data/GLEAM_small_visibilities.csv"; //"datasets/el82-70.txt";
     
     // Scalar value for scaling visibility UVW wavelengths to coordinates
-    config.frequencyStartHz = 1.0000e+08;
+    config.frequencyStartHz = SPEED_OF_LIGHT; //1.0000e+08;
     
     // Flag to determine grid center offset (true: indicates grid points land in the middle of a pixel 
     // (same as oxford gridder), false: indicates grid points should fall in between pixels (other implementations))
@@ -155,51 +161,53 @@ void initConfig(char** argv)
     // Flag to specify which fragment shader technique
     // to use when rendering frags
     // Options: FullCube, Reflect, Radial
-    config.fragShaderType = atoi(argv[5]);
+    config.fragShaderType = Reflect;
     
-    config.interpolateTextures = atoi(argv[12]);
+    config.interpolateTextures = 1; // 0 = nearest, 1 = interpolate
     
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
     config.numVisibilityParams = 6;
     
     // Number of gridding iterations to perform before terminating (all visibilities convolved each iteration)
-    config.displayDumpTime = 50;
+    config.displayDumpTime = 1;
     
     // variable used to control when the Gridder will exit after reaching the dump count, 
     // use a negative value to keep "infinite" gridding. 
     // Note: number of actual iterations is terminationDumpCount * displayDumpTime assuming dumpCount positive
     teminationDumpCount = 1;
+    
     //flag to save resulting grid to file (does this at dump time)
     config.saveGridToFile = true;
+    
     //Name output grids, ignored if above variable false;
-    config.outputGridReal = "GriddingOutputs/hec_output_grid_real.csv";
-    config.outputGridImag = "GriddingOutputs/hec_output_grid_imag.csv";
+    config.outputGridReal = "data/hec_grid_real.csv";
+    config.outputGridImag = "data/hec_grid_imag.csv";
     
     // Used to slow down GUI rendering (milliseconds) - 0 means no delay, 1000 means one second delay
     config.refreshDelay = 0;
     
     GLfloat renderTemp[8] = {
         -1.0f, -1.0f,
-        -1.0f, 1.0f,
-        1.0f, -1.0f,
-        1.0f, 1.0f
+        -1.0f,  1.0f,
+         1.0f, -1.0f,
+         1.0f,  1.0f
     };
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
     
     // MaximuFm W term to support
-    config.wProjectionMaxW = atof(argv[8]);//19225.322282;//7083.386050;
+    config.wProjectionMaxW = 1895.410847844;
     
     // Cell size radians for observation
-    config.cellSizeRad =  atof(argv[10]); // 4.848136811095360e-06;
+    config.cellSizeRad =  8.52211548825356E-06;
     
     // Number of W planes to create
-    config.wProjectNumPlanes = atoi(argv[9]);
+    config.wProjectNumPlanes = 17;
     
     // Scales W terms (used on GPU to determine w plane index)
     config.wScale = pow((double) config.wProjectNumPlanes-1, 2.0) / config.wProjectionMaxW;
     
     // Field of view for observation (relies on original grid dimension)
-    config.fieldOfView =  config.cellSizeRad * (double) config.gridDimension;
+    config.fieldOfView =  config.cellSizeRad * (double)  config.imageSize;
     
     // Scales visibility UV coordinates to grid coordinates
     config.uvScale = (double) config.gridDimension * config.cellSizeRad; 
@@ -212,36 +220,10 @@ void initConfig(char** argv)
     timer.sumOfSquareDiffTimeMS = 0.0;
     timer.iterations            = 0;
     timingOutputFile = argv[11];
-    
 }
 
-int main(int argc, char** argv) {            
-
-    // Incorrect number of arguments provided
-    if(argc != 13)
-    {
-        printf(">>> Invalid number of arguments: expecting 10 custom arguments\n");
-        printf(">>> argv[1]  = Visibility source file\n");
-        printf(">>> argv[2]  = kernel texture dimension\n");
-        printf(">>> argv[3]  = kernel resolution dimension\n");
-        printf(">>> argv[4]  = grid dimension\n");
-        printf(">>> argv[5]  = fragment shader type (1 = radial, 2 = reflect)\n");
-        printf(">>> argv[6]  = kernel min support (half)\n");
-        printf(">>> argv[7]  = kernel max support (half)\n");
-        printf(">>> argv[8]  = max w term\n");
-        printf(">>> argv[9]  = number w planes\n");
-        printf(">>> argv[10] = cell size (radians)\n");
-        printf(">>> argv[11] = configuration timing file\n");
-        printf(">>> argv[12] = enable texture interpolation (0 = false, 1 = true)\n");
-        return EXIT_FAILURE;
-    }
-    else
-    {
-        for(int i = 1; i < argc; i++)
-            printf("Argument %d: %s\n", i, argv[i]);
-        printf("\n");
-    }
-
+int main(int argc, char** argv)
+{
     initConfig(argv); 
     
     setenv("DISPLAY", ":0", 11.0);
@@ -296,7 +278,7 @@ void initGridder(void)
             visibilities = malloc(sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount);
             float temp_uu, temp_vv, temp_ww = 0.0f;
             float temp_real, temp_imag = 0.0f, temp_weight = 0.0f;
-            double scale = config.frequencyStartHz / 299792458.0; // convert from wavelengths
+            double scale = config.frequencyStartHz / SPEED_OF_LIGHT; // convert from wavelengths
             
             for(int i = 0; i < config.visibilityCount * config.numVisibilityParams; i+=config.numVisibilityParams)
             {
@@ -379,8 +361,8 @@ void initGridder(void)
     glGenTextures(2, idArray);
     textureID = idArray[0];
     glBindTexture(GL_TEXTURE_2D, textureID);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_2D);
@@ -436,6 +418,9 @@ void initGridder(void)
   
     if(config.fragShaderType != Radial)
         glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    
+    float borderColours[] = {0.0f,0.0f,0.0f,1.0f};
+    glTexParameterfv(KERNEL_DIM,GL_TEXTURE_BORDER_COLOR, borderColours);
     
     glEnable(KERNEL_DIM);
     
@@ -638,7 +623,9 @@ void runGridder(void) {
     
     // Terminate program
     if(totalDumpsPerformed == teminationDumpCount)
-    {   saveGriddingStats(timingOutputFile);
+    {   
+        // saveGriddingStats(timingOutputFile);
+        printf("Gridding is finished!!!\n\n");
         exit(0);
     }
 }
@@ -932,8 +919,8 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         // Create Phase Screen
         createPhaseScreen(convolutionSize, screen, w, fov, wFullSupport);
         
-        //if(iw == plane)
-        //    saveKernelToFile("output/wproj_%f_phase_screen_%d.csv", w, convolutionSize, screen);
+        if(iw == plane)
+            saveKernelToFile("data/wproj_%f_phase_screen_%d.csv", w, convolutionSize, screen);
         
         // Perform shift and inverse FFT of Phase Screen
         fft2dShift(convolutionSize, screen, shift);
@@ -941,77 +928,81 @@ void createWProjectionPlanes(FloatComplex *wTextures)
         fft2dShift(convolutionSize, screen, shift);
         
         
-//        if(iw == plane)
-//            saveKernelToFile("output/wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
+        if(iw == plane)
+            saveKernelToFile("data/wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
             
         // Interpolate w projection kernel down to texture support dimensions
          DoubleComplex *interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
          interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
          
-//         if(iw == plane)
-//             saveKernelToFile("output/wproj_%f_after_interpolated_%d.csv", w, textureSupport, interpolated);
+         if(iw == plane)
+             saveKernelToFile("data/wproj_%f_after_interpolated_%d.csv", w, textureSupport, interpolated);
 
         // Normalize the kernel
-        if(config.fragShaderType == Radial)
-            normalizeKernelRadial(interpolated, textureSupport, wFullSupport);
-        else
-            normalizeKernel(interpolated, textureSupport, wFullSupport);
+        normalizeKernel(interpolated, textureSupport, wFullSupport);
         
-//        if(iw == plane)
-//            saveKernelToFile("output/wproj_%f_normalized_%d_from_%d.csv", w, textureSupport, interpolated); 
+        if(iw == plane)
+            saveKernelToFile("data/wproj_%f_normalized_%d_from_%d.csv", w, textureSupport, interpolated); 
         
         
         // Bind interpolated kernel to texture matrix
-        if(config.fragShaderType == Radial)
-        {   
-            int startIndex =  textureSupport/2;
-            int kernelWidth = textureSupport/2;
+        int startIndex = (config.fragShaderType == Reflect) ? textureSupport/2 : 0;
+        int kernelWidth = (config.fragShaderType == Reflect) ? textureSupport/2 : textureSupport;
             
-            int y = startIndex;
-            
+        for(int y = startIndex; y < textureSupport; y++)
+        {
             for(int x = startIndex; x < textureSupport; x++)
             {
                 DoubleComplex interpWeight = interpolated[y * textureSupport + x];
                 FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
-                int index = (iw * kernelWidth)  + (x-startIndex);
+                int index = (iw * kernelWidth * kernelWidth) + ((y-startIndex) * kernelWidth) + (x-startIndex);
                 wTextures[index] = weight;
-                
-                if(x==(textureSupport-1))
-                {   wTextures[index].real = 0.0f;
-                    wTextures[index].imaginary = 0.0f;
-                } 
             }
-        }
-        else
-        {   
-            int startIndex = (config.fragShaderType == Reflect) ? textureSupport/2 : 0;
-            int kernelWidth = (config.fragShaderType == Reflect) ? textureSupport/2 : textureSupport;
-            
-            for(int y = startIndex; y < textureSupport; y++)
-            {
-                for(int x = startIndex; x < textureSupport; x++)
-                {
-                    DoubleComplex interpWeight = interpolated[y * textureSupport + x];
-                    FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
-                    int index = (iw * kernelWidth * kernelWidth) + ((y-startIndex) * kernelWidth) + (x-startIndex);
-                    wTextures[index] = weight;
-                }
-                
-            }  
-        } 
+
+        }  
          
         free(interpolated);
         memset(screen, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
         memset(shift, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
     }
     
-    if(config.fragShaderType == Radial && plane >= 0)
-    {
-        saveRadialKernelsToFile("output/wproj_%d_radial_%d.csv",textureSupport/2,numWPlanes,wTextures);
-    }
-    
     free(screen);
     free(shift);
+}
+
+void createPhaseScreenNew(int iw, int full_support, int conv_size, 
+    double sampling, double w_scale, DoubleComplex *screen)
+{        
+    double f = (2.0 * M_PI * iw * iw) / w_scale;
+    int conv_size_half = conv_size / 2;
+    int half_support = (full_support - 1) / 2;
+    
+    for(int iy = 0; iy < full_support; ++iy)
+    {
+        double stride_y = fabs((iy - full_support / 2) / ((double) full_support / 2.0));
+        double taper_y = calcSpheroidalWeight(stride_y);
+        printf(">>> %f\n", stride_y);
+        double m = sampling * (double) (iy - half_support);
+        double msq = m*m;
+        for(int ix = 0; ix < full_support; ++ix)
+        {
+            double l = sampling * (double) (ix - half_support);
+            double rsq = l * l + msq;
+            if (rsq < 1.0) {
+                double stride_x = fabs((ix - full_support / 2) / ((double) full_support / 2.0));
+                double taper_x = calcSpheroidalWeight(stride_x);
+                double taper = taper_x * taper_y;               
+                int row_index = conv_size_half + iy - half_support;
+                int col_index = conv_size_half + ix - half_support;
+                int index = row_index * conv_size + col_index;
+                double phase = f * (sqrt(1.0 - rsq) - 1.0);
+                screen[index] = (DoubleComplex) {
+                    .real      = taper * cos(phase),
+                    .imaginary = taper * sin(phase)
+                };
+            }
+        }
+    }
 }
 
 void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double w, double fieldOfView, int wFullSupport)
@@ -1041,19 +1032,13 @@ void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double 
                     + (ix+(resolutionHalfSupport-paddedWHalfSupport));
 
             nuX = fabs(calcAndrewShift(ix, paddedWFullSupport));
-            
-            if(config.fragShaderType == Radial)
-            {
-                radius = sqrt(nuX * nuX + nuY * nuY);
-                taper = calcSpheroidalWeight(radius);
-            }
-            else
-                taper = taperY * calcSpheroidalWeight(nuX);
+            taper = taperY * calcSpheroidalWeight(nuX);
             
             if(rsq < 1.0)
             {
                 phase = w * (1.0 - sqrt(1.0 - rsq));
                 screen[index] = complexConjugateExp(phase);
+
             }
             
             if(rsq == 0.0)
@@ -1195,7 +1180,7 @@ double calcSpheroidalWeight(double nu)
         part = 0;   
         nuend = 0.75;
     }
-    else if(nu >= 0.75 && nu <= 1.0)
+    else if(nu >= 0.75 && nu < 1.0)
     {
         part = 1;
         nuend = 1.0;
@@ -1251,12 +1236,12 @@ void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted)
 }
 
 
-float calcAndrewShift(int index, int fullSupport)
+double calcAndrewShift(int index, int fullSupport)
 {
-    return (index - fullSupport/2) / ((float) fullSupport / 2.0f);
+    return (index - fullSupport / 2) / ((double) fullSupport / 2.0);
 }
 
-float calcInterpolateShift(float index, float width)
+double calcInterpolateShift(double index, double width)
 {
     return -1.0 + ((2.0 * index + 1.0) / width);
 }
@@ -1264,7 +1249,7 @@ float calcInterpolateShift(float index, float width)
 int calcRelativeIndex(double x, double width)
 {
     int offset = (x < 0.0) ? 1 : 2;
-    return ((int) floor(((x+1.0f)/2.0f) * (width-offset)))+1;
+    return ((int) floor(((x+1.0)/2.0) * (width-offset)))+1;
 }
 
 double calcSphrShift(double index, double width)
@@ -1282,7 +1267,7 @@ void saveKernelToFile(char* filename, float w, int support, DoubleComplex* data)
         for(int c = 0; c < support; c++)
         {
             //if(r == support/2)
-                fprintf(file, "%.20f, ", data[r * support + c].real);
+                fprintf(file, "%.15f ", data[r * support + c].real);
         }
         fprintf(file, "\n");
     }
@@ -1364,12 +1349,12 @@ void interpolateKernel(DoubleComplex *source, DoubleComplex *destination,
     for(int r = 0; r < destinationSupport; r++)
     {
         // Determine relative shift for interpolation row [-1.0, 1.0]
-        rowShift = calcInterpolateShift((float)r, (float)destinationSupport);
+        rowShift = calcInterpolateShift((double)r, (double)destinationSupport);
         
         for(int c = 0; c < destinationSupport; c++)
         {
             // Determine relative shift for interpolation col [-1.0, 1.0]
-            colShift = calcInterpolateShift((float)c, (float)destinationSupport);
+            colShift = calcInterpolateShift((double)c, (double)destinationSupport);
             
             // gather 16 neighbours
             getBicubicNeighbours(rowShift, colShift, n, rs, cs, sourceSupport, source);

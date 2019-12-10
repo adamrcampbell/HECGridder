@@ -24,7 +24,7 @@ CLEAN_SUBPROJECTS=${CLEAN_SUBPROJECTS_${SUBPROJECTS}}
 
 
 # Project Name
-PROJECTNAME=HECGridder
+PROJECTNAME=hec_gridder
 
 # Active Configuration
 DEFAULTCONF=Debug
