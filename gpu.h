@@ -72,8 +72,8 @@
   out float wPlane;\
   out float conjugate;\
   void main() { \
-     gl_Position.rg = (round(position.rg*uvScale) / gridCenter) + vec2(gridCenterOffset, -gridCenterOffset); \
-     wPlane = round(sqrt(abs(position.b*wScale))) * wStep; \
+     gl_Position.rg = (round(position.rg*uvScale) / gridCenter) + vec2(gridCenterOffset, gridCenterOffset); \
+     wPlane = round(sqrt(abs(position.b*wScale))) * wStep + (0.5 * wStep); \
      float wSupport = abs(wToMaxSupportRatio*position.b) + minSupportOffset; \
      conjugate = -sign(position.b);\
      gl_PointSize = wSupport + (1.0 - mod(wSupport, 2.0)); \
