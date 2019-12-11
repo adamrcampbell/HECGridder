@@ -115,7 +115,7 @@ void initConfig(char** argv)
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernelTexSize = 32;
+    config.kernelTexSize = 128;
 
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
@@ -906,7 +906,7 @@ void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support)
 
 void create_w_projection_kernels(FloatComplex *w_textures)
 {
-    const int oversample = 4;
+    const int oversample = 128;
     const int conv_size = config.kernelResolutionSize;
     const int inner = conv_size / oversample;
     const int grid_size = config.gridDimension;
@@ -1722,10 +1722,10 @@ void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, do
     // counter for active neighbour
     int nIndex = 0;
     // define neighbour boundaries
-    int rStart = (rowShift < 0.0) ? y-1 : y-1;
-    int rEnd = (rowShift < 0.0) ? y+3 : y+3;
-    int cStart = (colShift < 0.0) ? x-1 : x-1;
-    int cEnd = (colShift < 0.0) ? x+3 : x+3;
+    int rStart = (rowShift < 0.0) ? y-1 : y-2;
+    int rEnd = (rowShift < 0.0) ? y+3 : y+2;
+    int cStart = (colShift < 0.0) ? x-1 : x-2;
+    int cEnd = (colShift < 0.0) ? x+3 : x+2;
     
     // gather 16 neighbours
     for(int r = rStart; r < rEnd; r++)
