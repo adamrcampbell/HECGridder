@@ -24,8 +24,8 @@ typedef struct Config {
     unsigned int imageSize;
     unsigned int kernelTexSize;
     unsigned int kernelResolutionSize;
-    float kernelMaxFullSupport;
-    float kernelMinFullSupport;
+    double kernelMaxFullSupport;
+    double kernelMinFullSupport;
     unsigned int visibilityCount;
     unsigned int numVisibilityParams;
     bool visibilitiesFromFile;
@@ -103,8 +103,6 @@ void createWProjectionPlanes(FloatComplex *wTextures);
 void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, 
         double w, double fieldOfView, int wFullSupport);
 
-double calcSpheroidalWeight(double nu);
-
 void inverseFFT2dVectorRadixTransform(int numChannels, DoubleComplex *input, 
         DoubleComplex *output);
 
@@ -114,8 +112,7 @@ void fft2dShift(int n, DoubleComplex *input, DoubleComplex *shifted);
 
 double calcInterpolateShift(double index, double width);
 
-void saveKernelToFile(char* filename, float w, int support, 
-        DoubleComplex* data);
+void saveKernelToFile(char* filename, double w, int support, DoubleComplex* data);
 
 void saveRadialKernelsToFile(char* filename, int support, int wPlanes, 
         FloatComplex* data);
@@ -128,8 +125,8 @@ void interpolateKernel(DoubleComplex *source, DoubleComplex *destination,
     int sourceSupport, int destinationSupport);
 
 void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, 
-        double *rs, double *cs,
-        int sourceSupport, DoubleComplex *source);
+        double *rs, double *cs, int sourceSupport, DoubleComplex *source,
+        const int oversampled_support);
 
 DoubleComplex interpolateSample(DoubleComplex z0, DoubleComplex z1, 
     DoubleComplex z2, DoubleComplex z3, double x0, double x1, double x2,
@@ -156,5 +153,33 @@ void saveGriddingStats(char *filename);
 
 void createPhaseScreenNew(int iw, int full_support, int conv_size, 
     double sampling, double w_scale, DoubleComplex *screen);
+
+
+
+    void create_w_projection_kernels(FloatComplex *w_textures);
+
+    DoubleComplex complex_scale(const DoubleComplex z, const double scalar);
+    
+    void fft_shift_in_place(DoubleComplex *matrix, const int size);
+    
+    double calculate_window_stride(const int index, const int width);
+
+    double prolate_spheroidal(double nu);
+    
+    void generate_phase_screen(const int iw, const int conv_size, const int inner,
+        const double sampling, const double w_scale, double *taper, DoubleComplex *screen);
+    
+    void fft_2d(DoubleComplex *matrix, int number_channels);
+    
+    void calc_bit_reverse_indices(int n, int* indices);
+    
+    void interpolate_kernel(DoubleComplex *screen, DoubleComplex *texture, 
+        const int screen_size, const int texture_size, const double support,
+        const int oversample);
+    
+    double calculate_support(const double w, const int min_support, 
+        const double w_max_support_ratio);
+    
+    void normalize_kernel(DoubleComplex *kernel, const int texture_size, const double support);
 
 #endif /* GRIDDER_H */
