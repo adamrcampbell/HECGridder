@@ -124,9 +124,27 @@ double calcSphrShift(double index, double width);
 void interpolateKernel(DoubleComplex *source, DoubleComplex *destination, 
     int sourceSupport, int destinationSupport);
 
+// void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, 
+//         double *rs, double *cs, int sourceSupport, DoubleComplex *source,
+//         const int oversampled_support);
+
+
+
+
+
+void interpolate_kernel_tiny(DoubleComplex *screen, DoubleComplex *texture, 
+    int screen_size, int texture_size, int oversampled_support);
+
+void getBicubicNeighboursTiny(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
+        int sourceSupport, DoubleComplex *source, int oversampled_support);
+
+
+
+
+
+
 void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, 
-        double *rs, double *cs, int sourceSupport, DoubleComplex *source,
-        const int oversampled_support);
+        double *rs, double *cs, int sourceSupport, DoubleComplex *source);
 
 DoubleComplex interpolateSample(DoubleComplex z0, DoubleComplex z1, 
     DoubleComplex z2, DoubleComplex z3, double x0, double x1, double x2,
