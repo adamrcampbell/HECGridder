@@ -115,7 +115,7 @@ void initConfig(char** argv)
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernelTexSize = 128;
+    config.kernelTexSize = 256;
 
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
@@ -141,18 +141,18 @@ void initConfig(char** argv)
     config.visibilitiesFromFile = false;
     
     // Source of visibility data
-    config.visibilitySourceFile = "data/GLEAM_small_visibilities.csv"; //"datasets/el82-70.txt";
+    config.visibilitySourceFile = "../data/GLEAM_small_visibilities.csv"; //"datasets/el82-70.txt";
     
     // Scalar value for scaling visibility UVW wavelengths to coordinates
     config.frequencyStartHz = SPEED_OF_LIGHT; //1.0000e+08;
     
     // Flag to determine grid center offset (true: indicates grid points land in the middle of a pixel 
     // (same as oxford gridder), false: indicates grid points should fall in between pixels (other implementations))
-    config.offsetVisibilities = true;
+    config.offsetVisibilities = false;
     
     // Uses heavy interpolation for convolving visibilities to grid (on GPU)
     // Note: slows down gridding a batch of visibilities, but improves precision
-    config.useHeavyInterpolation = true;
+    config.useHeavyInterpolation = true; // DO NOT SET TO FALSE!!! (Doesnt work)
     
     config.accumulateMode = false;
     
@@ -163,7 +163,7 @@ void initConfig(char** argv)
     // Options: FullCube, Reflect, Radial
     config.fragShaderType = Reflect;
     
-    config.interpolateTextures = 1; // 0 = nearest, 1 = interpolate
+    config.interpolateTextures = 0; // 0 = nearest, 1 = interpolate
     
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
     config.numVisibilityParams = 6;
@@ -180,8 +180,8 @@ void initConfig(char** argv)
     config.saveGridToFile = true;
     
     //Name output grids, ignored if above variable false;
-    config.outputGridReal = "data/hec_grid_real.csv";
-    config.outputGridImag = "data/hec_grid_imag.csv";
+    config.outputGridReal = "../data/hec_grid_real.csv";
+    config.outputGridImag = "../data/hec_grid_imag.csv";
     
     // Used to slow down GUI rendering (milliseconds) - 0 means no delay, 1000 means one second delay
     config.refreshDelay = 0;
@@ -361,8 +361,8 @@ void initGridder(void)
     glGenTextures(2, idArray);
     textureID = idArray[0];
     glBindTexture(GL_TEXTURE_2D, textureID);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glEnable(GL_TEXTURE_2D);
@@ -420,8 +420,8 @@ void initGridder(void)
     if(config.fragShaderType != Radial)
         glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     
-    float borderColours[] = {0.0f,0.0f,0.0f,1.0f};
-    glTexParameterfv(KERNEL_DIM,GL_TEXTURE_BORDER_COLOR, borderColours);
+  //  float borderColours[] = {0.0f,0.0f,0.0f,1.0f};
+  //  glTexParameterfv(KERNEL_DIM,GL_TEXTURE_BORDER_COLOR, borderColours);
     
     glEnable(KERNEL_DIM);
     
@@ -906,7 +906,7 @@ void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support)
 
 void create_w_projection_kernels(FloatComplex *w_textures)
 {
-    const int oversample = 128;
+    const int oversample = 4;
     const int conv_size = config.kernelResolutionSize;
     const int inner = conv_size / oversample;
     const int grid_size = config.gridDimension;
@@ -943,8 +943,12 @@ void create_w_projection_kernels(FloatComplex *w_textures)
     {
         double taper_nu = fabs(calculate_window_stride(taper_i, inner));
         taper[taper_i] = prolate_spheroidal(taper_nu);
+        printf("Sphr: %f => %f\n", taper_nu, taper[taper_i]);
     }
     
+    printf("Sampling: %f\n", sampling);
+    printf("FOV: %f\n", fov);
+
     const int plane = 0;
     
     printf(">>> UPDATE: Creating w projection kernels...\n");
@@ -965,7 +969,7 @@ void create_w_projection_kernels(FloatComplex *w_textures)
         generate_phase_screen(iw, conv_size, inner, sampling, w_scale, taper, screen);
         
         if(iw == plane)
-            saveKernelToFile("data/wproj_%f_phase_screen_%d.csv", w, conv_size, screen);
+            saveKernelToFile("../data/wproj_%f_phase_screen_%d.csv", w, conv_size, screen);
         
         printf(">>> UPDATE: Executing Fourier Transform...\n");
         fft_shift_in_place(screen, conv_size);
@@ -973,20 +977,22 @@ void create_w_projection_kernels(FloatComplex *w_textures)
         fft_shift_in_place(screen, conv_size);
         
         if(iw == plane)
-            saveKernelToFile("data/wproj_%f_after_fft_%d.csv", w, conv_size, screen);
+            saveKernelToFile("../data/wproj_%f_after_fft_%d.csv", w, conv_size, screen);
         
         printf(">>> UPDATE: Performing bicubic interpolation...\n");
-        interpolate_kernel(screen, texture, conv_size, texture_size, support, oversample);
+        // interpolate_kernel(screen, texture, conv_size, texture_size, support, oversample);
+        interpolate_kernel_tiny(screen, texture, conv_size, texture_size, 
+            (int) support * oversample);
         
         if(iw == plane)
-            saveKernelToFile("data/wproj_%f_after_interpolated_%d.csv", w, texture_size, texture);
+            saveKernelToFile("../data/wproj_%f_after_interpolated_%d.csv", w, texture_size, texture);
 
         // Normalize the kernel
         printf(">>> UPDATE: Performing kernel normalization...\n");
         normalize_kernel(texture, texture_size, support);
         
         if(iw == plane)
-            saveKernelToFile("data/wproj_%f_normalized_%d_from_%d.csv", w, texture_size, texture); 
+            saveKernelToFile("../data/wproj_%f_normalized_%d_from_%d.csv", w, texture_size, texture); 
         
         // Bind scaled and normalized texture to 3D texture block
         printf(">>> UPDATE: Clipping produced kernel, storing into 3D texture block...\n");
@@ -1444,7 +1450,7 @@ double prolate_spheroidal(double nu)
         part = 0;   
         nuend = 0.75;
     }
-    else if(nu >= 0.75 && nu < 1.0)
+    else if(nu >= 0.75 && nu <= 1.0)
     {
         part = 1;
         nuend = 1.0;
@@ -1527,8 +1533,11 @@ double calcInterpolateShift(double index, double width)
 
 int calcRelativeIndex(double x, double width)
 {
-    int offset = 0;//(x < 0.0) ? 1 : 2;
-    return ((int) round(((x+1.0)/2.0) * (width-offset))) ;
+    // int offset = 0; //(x < 0.0) ? 1 : 2;
+    // return ((int) round(((x+1.0f)/2.0f) * (width-offset)));
+
+    int offset = (x < 0.0) ? 1 : 2;
+    return ((int) floor(((x+1.0f)/2.0f) * (width-offset)))+1;
 }
 
 double calcSphrShift(double index, double width)
@@ -1614,184 +1623,185 @@ void saveGridToFile(int support)
     printf("Grid has been output to file\n");
 }
 
-void interpolate_kernel(DoubleComplex *screen, DoubleComplex *texture, 
-    const int screen_size, const int texture_size, const double support,
-        const int oversample)
+void interpolate_kernel_tiny(DoubleComplex *screen, DoubleComplex *texture, 
+    int screen_size, int texture_size, int oversampled_support)
 {
-    const int oversampled_support = oversample * support;
-    
-    // Determine "distance" between source samples in range [-1.0, 1.0]
-    double screen_shift = 2.0 / (oversampled_support - 1.0);
-    
+    double oversampled_support_shift = 2.0 / (oversampled_support - 1.0);
     // Storage for neighbours, synthesized points
-    DoubleComplex n[16], p[4];
+    DoubleComplex *n = calloc(16, sizeof(DoubleComplex));
+    DoubleComplex *p = calloc(4, sizeof(DoubleComplex));
     
     // Neighbours shift values (rs = row shift, cs = col shift)
     double *rs = calloc(16, sizeof(double));
     double *cs = calloc(16, sizeof(double));
-    double row_shift, col_shift = 0.0;
+    double rowShift, colShift = 0.0;
     
     for(int r = 0; r < texture_size; r++)
-    {        
+    {
         // Determine relative shift for interpolation row [-1.0, 1.0]
-        row_shift = calcInterpolateShift((double)r, (double) texture_size);
+        rowShift = calcInterpolateShift(r, texture_size);
         
         for(int c = 0; c < texture_size; c++)
         {
             memset(rs, 0, 16 * sizeof(double));
             memset(cs, 0, 16 * sizeof(double));
-            
+            memset(n, 0, 16 * sizeof(DoubleComplex));
+            memset(p, 0, 4 * sizeof(DoubleComplex));
+
             // Determine relative shift for interpolation col [-1.0, 1.0]
-            col_shift = calcInterpolateShift((double)c, (double) texture_size);
+            colShift = calcInterpolateShift(c, texture_size);
             
             // gather 16 neighbours
-            getBicubicNeighbours(row_shift, col_shift, n, rs, cs, screen_size,
-                screen, oversampled_support);
-            
+            getBicubicNeighboursTiny(rowShift, colShift, n, rs, cs, screen_size, screen, oversampled_support);
             // interpolate intermediate samples
             p[0] = interpolateSample(n[0], n[1], n[2], n[3],
-                cs[0], cs[1], cs[2], cs[3], screen_shift, col_shift);
+                cs[0], cs[1], cs[2], cs[3], oversampled_support_shift, colShift);
             p[1] = interpolateSample(n[4], n[5], n[6], n[7],
-                cs[4], cs[5], cs[6], cs[7], screen_shift, col_shift);
+                cs[4], cs[5], cs[6], cs[7], oversampled_support_shift, colShift);
             p[2] = interpolateSample(n[8], n[9], n[10], n[11],
-                cs[8], cs[9], cs[10], cs[11], screen_shift, col_shift);
+                cs[8], cs[9], cs[10], cs[11], oversampled_support_shift, colShift);
             p[3] = interpolateSample(n[12], n[13], n[14], n[15],
-                cs[12], cs[13], cs[14], cs[15], screen_shift, col_shift);
+                cs[12], cs[13], cs[14], cs[15], oversampled_support_shift, colShift);
             
             // interpolate final sample
             texture[r * texture_size + c] = interpolateSample(p[0], p[1], p[2], p[3],
-               rs[1], rs[5], rs[9], rs[13], screen_shift, row_shift);
+               rs[1], rs[5], rs[9], rs[13], oversampled_support_shift, rowShift);
         }
     }
-    
+
+    free(n);
+    free(p);
     free(rs);
     free(cs);
 }
 
-//void interpolateKernel(DoubleComplex *source, DoubleComplex *destination, 
-//    int sourceSupport, int destinationSupport)
-//{
-//    // Determine "distance" between source samples in range [-1.0, 1.0]
-//    double sourceShift = 2.0/(sourceSupport-1.0);
-//    // Storage for neighbours, synthesized points
-//    DoubleComplex n[16], p[4];
-//    // Neighbours shift values (rs = row shift, cs = col shift)
-//    double rs[16], cs[16];
-//    double rowShift, colShift = 0.0;
-//    
-//    for(int r = 0; r < destinationSupport; r++)
-//    {
-//        // Determine relative shift for interpolation row [-1.0, 1.0]
-//        rowShift = calcInterpolateShift((double)r, (double)destinationSupport);
-//        
-//        for(int c = 0; c < destinationSupport; c++)
-//        {
-//            // Determine relative shift for interpolation col [-1.0, 1.0]
-//            colShift = calcInterpolateShift((double)c, (double)destinationSupport);
-//            
-//            // gather 16 neighbours
-//            getBicubicNeighbours(rowShift, colShift, n, rs, cs, sourceSupport, source);
-//            // interpolate intermediate samples
-//            p[0] = interpolateSample(n[0], n[1], n[2], n[3],
-//                cs[0], cs[1], cs[2], cs[3], sourceShift, colShift);
-//            p[1] = interpolateSample(n[4], n[5], n[6], n[7],
-//                cs[4], cs[5], cs[6], cs[7], sourceShift, colShift);
-//            p[2] = interpolateSample(n[8], n[9], n[10], n[11],
-//                cs[8], cs[9], cs[10], cs[11], sourceShift, colShift);
-//            p[3] = interpolateSample(n[12], n[13], n[14], n[15],
-//                cs[12], cs[13], cs[14], cs[15], sourceShift, colShift);
-//            
-//            // interpolate final sample
-//            destination[r * destinationSupport + c] = interpolateSample(p[0], p[1], p[2], p[3],
-//               rs[1], rs[5], rs[9], rs[13], sourceShift, rowShift);
-//        }
-//    }
-//}
+void getBicubicNeighboursTiny(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
+        int screen_size, DoubleComplex *screen, int oversampled_support)
+{   
+    // support = 9, os = 4
+    int half_support = (9-1) / 2;
+    int oversampled_half_support = half_support * 4; // 16
+    int offset = (screen_size / 2 - oversampled_half_support);
 
-void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
-        int screen_size, DoubleComplex *screen, const int oversampled_support)
-{
-    const int offset = (screen_size / 2 - oversampled_support / 2);
-    // determine where to start locating neighbours in source matrix
-    int x = calcRelativeIndex(colShift, (double) oversampled_support);
-    int y = calcRelativeIndex(rowShift, (double) oversampled_support);
-    
-    // printf("x = %f, y = %f\n", colShift, rowShift);
-   // printf("x = %d, y = %d\n", x, y);
-    
+
+   // int offset = (screen_size / 2 - oversampled_support / 2);
+
+    // int x = ((int) floor(((colShift + 1.0f) / 2.0f) * (oversampled_support-1)))+1;
+    // int y = ((int) floor(((rowShift + 1.0f) / 2.0f) * (oversampled_support-1)))+1;
+
+    int x = (int) floor(((colShift + 1.0) / 2.0) * (double)oversampled_support);
+    int y = (int) floor(((rowShift + 1.0) / 2.0) * (double)oversampled_support);
+
     // counter for active neighbour
     int nIndex = 0;
-    // define neighbour boundaries
-    int rStart = (rowShift < 0.0) ? y-1 : y-2;
-    int rEnd = (rowShift < 0.0) ? y+3 : y+2;
-    int cStart = (colShift < 0.0) ? x-1 : x-2;
-    int cEnd = (colShift < 0.0) ? x+3 : x+2;
-    
+
     // gather 16 neighbours
-    for(int r = rStart; r < rEnd; r++)
+    for(int r = y - 1; r < y + 3; r++)
     {   
-        for(int c = cStart; c < cEnd; c++)
+        for(int c = x - 1; c < x + 3; c++)
         {
+            rs[nIndex] = calcSphrShift(r, oversampled_support);
+
             // set row and col shifts for neighbour
-//            rs[nIndex] = (rowShift < 0.0) ? calcSphrShift(r, oversampled_support+1) : calcSphrShift(r, oversampled_support+1);
-//            cs[nIndex] = (colShift < 0.0) ? calcSphrShift(c, oversampled_support+1) : calcSphrShift(c, oversampled_support+1);       
-            
-            rs[nIndex] = (true) ? calcSphrShift(r, oversampled_support) : calcSphrShift(r, oversampled_support);
-            cs[nIndex] = (true) ? calcSphrShift(c, oversampled_support) : calcSphrShift(c, oversampled_support);
-            
+            cs[nIndex] = calcSphrShift(c, oversampled_support);  
+
             // neighbour falls out of bounds
-            if(r < 0 || c < 0 || r >= oversampled_support || c >= oversampled_support)
+            if(r < 0 || c < 0 || r > oversampled_support || c > oversampled_support)
                 n[nIndex] = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};
             // neighbour exists
             else
-                n[nIndex] = screen[(r+offset) * screen_size + (c+offset)];
-            
-//             printf("[r: %f, c: %f] ", rs[nIndex], cs[nIndex]);
-//             printf("[r: %d, c: %d] ", r, c);
-            
+            {    
+                int row = (r >= oversampled_support/2) ? r : oversampled_support/2 -r;
+                int col = (c >= oversampled_support/2) ? c : oversampled_support/2 -c;
+                n[nIndex] = screen[(row + offset) * screen_size + col + offset];
+            }
             nIndex++;
         }
-//         printf("\n");
     }   
-    // printf("\n\n");
 }
 
-//void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
-//        int screen_size, DoubleComplex *screen, const int oversampled_support)
-//{
-//    const int offset = screen_size / 2 - oversampled_support / 2;
-//    // determine where to start locating neighbours in source matrix
-//    int x = calcRelativeIndex(colShift, (double) oversampled_support);
-//    int y = calcRelativeIndex(rowShift, (double) oversampled_support);
-//    
-//    // printf("x = %d, y = %d\n", x,y);
-//    // counter for active neighbour
-//    int nIndex = 0;
-//    // define neighbour boundaries
-//    int rStart = (rowShift < 0.0) ? y-1 : y-2;
-//    int rEnd = (rowShift < 0.0) ? y+3 : y+2;
-//    int cStart = (colShift < 0.0) ? x-1 : x-2;
-//    int cEnd = (colShift < 0.0) ? x+3 : x+2;
-//    
-//    // gather 16 neighbours
-//    for(int r = rStart; r < rEnd; r++)
-//    {   
-//        for(int c = cStart; c < cEnd; c++)
-//        {
-//            // set row and col shifts for neighbour
-//            rs[nIndex] = (rowShift < 0.0) ? calcSphrShift(r-1, oversampled_support-1) : calcSphrShift(r, oversampled_support-1);
-//            cs[nIndex] = (colShift < 0.0) ? calcSphrShift(c-1, oversampled_support-1) : calcSphrShift(c, oversampled_support-1);            
-//            // neighbour falls out of bounds
-//            if(r < 0 || c < 0 || r >= oversampled_support || c >= oversampled_support)
-//                n[nIndex] = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};
-//            // neighbour exists
-//            else
-//                n[nIndex] = screen[(r+offset) * screen_size + (c+offset)];
-//
-//            nIndex++;
-//        }
-//    }   
-//}
+
+// void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
+//         int screen_size, DoubleComplex *screen, const int oversampled_support)
+// {
+//     const int offset = (screen_size / 2 - oversampled_support / 2);
+//     // determine where to start locating neighbours in source matrix
+//     int x = calcRelativeIndex(colShift, (double) oversampled_support);
+//     int y = calcRelativeIndex(rowShift, (double) oversampled_support);
+    
+//     // printf("x = %f, y = %f\n", colShift, rowShift);
+//    // printf("x = %d, y = %d\n", x, y);
+    
+//     // counter for active neighbour
+//     int nIndex = 0;
+//     // define neighbour boundaries
+//     int rStart = (rowShift < 0.0) ? y-1 : y-2;
+//     int rEnd = (rowShift < 0.0) ? y+3 : y+2;
+//     int cStart = (colShift < 0.0) ? x-1 : x-2;
+//     int cEnd = (colShift < 0.0) ? x+3 : x+2;
+    
+//     // gather 16 neighbours
+//     for(int r = rStart; r < rEnd; r++)
+//     {   
+//         for(int c = cStart; c < cEnd; c++)
+//         {
+//             // set row and col shifts for neighbour
+// //            rs[nIndex] = (rowShift < 0.0) ? calcSphrShift(r, oversampled_support+1) : calcSphrShift(r, oversampled_support+1);
+// //            cs[nIndex] = (colShift < 0.0) ? calcSphrShift(c, oversampled_support+1) : calcSphrShift(c, oversampled_support+1);       
+            
+//             rs[nIndex] = (true) ? calcSphrShift(r, oversampled_support) : calcSphrShift(r, oversampled_support);
+//             cs[nIndex] = (true) ? calcSphrShift(c, oversampled_support) : calcSphrShift(c, oversampled_support);
+            
+//             // neighbour falls out of bounds
+//             if(r < 0 || c < 0 || r >= oversampled_support || c >= oversampled_support)
+//                 n[nIndex] = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};
+//             // neighbour exists
+//             else
+//                 n[nIndex] = screen[(r+offset) * screen_size + (c+offset)];
+            
+// //             printf("[r: %f, c: %f] ", rs[nIndex], cs[nIndex]);
+// //             printf("[r: %d, c: %d] ", r, c);
+            
+//             nIndex++;
+//         }
+// //         printf("\n");
+//     }   
+//     // printf("\n\n");
+// }
+
+// void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
+//         int sourceSupport, DoubleComplex *source)
+// {
+//     // determine where to start locating neighbours in source matrix
+//     int x = calcRelativeIndex(colShift, (double) sourceSupport);
+//     int y = calcRelativeIndex(rowShift, (double) sourceSupport);
+//     // counter for active neighbour
+//     int nIndex = 0;
+//     // define neighbour boundaries
+//     int rStart = (rowShift < 0.0) ? y-1 : y-2;
+//     int rEnd = (rowShift < 0.0) ? y+3 : y+2;
+//     int cStart = (colShift < 0.0) ? x-1 : x-2;
+//     int cEnd = (colShift < 0.0) ? x+3 : x+2;
+    
+//     // gather 16 neighbours
+//     for(int r = rStart; r < rEnd; r++)
+//     {   
+//         for(int c = cStart; c < cEnd; c++)
+//         {
+//             // set row and col shifts for neighbour
+//             rs[nIndex] = (rowShift < 0.0) ? calcSphrShift(r-1, sourceSupport-1) : calcSphrShift(r, sourceSupport-1);
+//             cs[nIndex] = (colShift < 0.0) ? calcSphrShift(c-1, sourceSupport-1) : calcSphrShift(c, sourceSupport-1);            
+//             // neighbour falls out of bounds
+//             if(r < 1 || c < 1 || r >= sourceSupport || c >= sourceSupport)
+//                 n[nIndex] = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};
+//             // neighbour exists
+//             else
+//                 n[nIndex] = source[r * sourceSupport + c];
+
+//             nIndex++;
+//         }
+//     }   
+// }
 
 DoubleComplex interpolateSample(DoubleComplex z0, DoubleComplex z1, 
     DoubleComplex z2, DoubleComplex z3, double x0, double x1, double x2,

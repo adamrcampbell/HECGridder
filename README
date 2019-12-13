@@ -1,1 +1,3 @@
 This is a git repository for the HEC Gridding algorithm
+
+Latest information: Phase screen and FFT are consistent with normal w-projection kernels. We suspect that the bicubic is not selecting the correct neighbours/values during interpolation, and appears to be unbalanced. I suspect this is because we have been using full support * oversample in logic, when we should probably be using half support * oversample.
