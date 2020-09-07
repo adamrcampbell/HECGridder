@@ -11,30 +11,26 @@
 #define GRIDDER_H
 
 /*--------------------------------------------------------------------
-*   ENUMERATION
-*-------------------------------------------------------------------*/
-enum FragShaderType {FullCube = 0, Radial = 1, Reflect = 2};
-/*--------------------------------------------------------------------
 *   STRUCTS
 *-------------------------------------------------------------------*/
 typedef struct Config {
     // General
-    unsigned int gridDimension;
+    double grid_size_padding_scalar;
+    unsigned int grid_size;
+    unsigned int grid_size_padded;
     unsigned int renderDimension;
-    unsigned int imageSize;
-    unsigned int kernelTexSize;
-    unsigned int kernelResolutionSize;
-    double kernelMaxFullSupport;
-    double kernelMinFullSupport;
+    unsigned int kernel_half_tex_size;
+    unsigned int kernel_half_res_size;
+    int max_half_support;
+    int min_half_support;
     unsigned int visibilityCount;
     unsigned int numVisibilityParams;
     bool visibilitiesFromFile;
     double frequencyStartHz;
     bool offsetVisibilities;
-    bool useHeavyInterpolation;
-    bool accumulateMode;
     bool saveGridToFile;
     unsigned int numVectorElements;
+    int kernel_oversampling;
 
     // GUI
     unsigned int refreshDelay;
@@ -45,7 +41,7 @@ typedef struct Config {
     double uvScale;
     double wScale;
     double fieldOfView;
-    double wProjectionMaxW;
+    double max_w;
     unsigned int wProjectNumPlanes;
     double wToMaxSupportRatio;
     
@@ -54,7 +50,6 @@ typedef struct Config {
     char* outputGridReal;
     char* outputGridImag;
     
-    enum FragShaderType fragShaderType;
     unsigned int interpolateTextures;
     
 } Config;
@@ -129,19 +124,8 @@ void interpolateKernel(DoubleComplex *source, DoubleComplex *destination,
 //         const int oversampled_support);
 
 
-
-
-
-void interpolate_kernel_tiny(DoubleComplex *screen, DoubleComplex *texture, 
-    int screen_size, int texture_size, int oversampled_support);
-
-void getBicubicNeighboursTiny(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
-        int sourceSupport, DoubleComplex *source, int oversampled_support);
-
-
-
-
-
+void get_bicubic_neighbours(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
+        int sourceSupport, DoubleComplex *source, double support, int oversample);
 
 void getBicubicNeighbours(double rowShift, double colShift, DoubleComplex *n, 
         double *rs, double *cs, int sourceSupport, DoubleComplex *source);
@@ -199,5 +183,12 @@ void createPhaseScreenNew(int iw, int full_support, int conv_size,
         const double w_max_support_ratio);
     
     void normalize_kernel(DoubleComplex *kernel, const int texture_size, const double support);
+
+    void normalize_screen_by_max_peak(double max_peak, DoubleComplex* screen, int conv_size);
+
+    void normalize_screen_sum_of_one(double sum_of_plane_0, DoubleComplex* screen, int conv_size);
+
+    void interpolate_kernel_to_texture(DoubleComplex *screen, DoubleComplex* texture, int conv_size, 
+        int tex_half_size, double support, int oversample);
 
 #endif /* GRIDDER_H */
