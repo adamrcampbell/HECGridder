@@ -103,7 +103,6 @@ int teminationDumpCount;
 int windowDisplay;
 // Global gridder configuration
 Config config;
-bool COMPARE_TO_ANTHONY = false;
 Timer timer;
 char* timingOutputFile;
 
@@ -115,23 +114,28 @@ void initConfig(char** argv)
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernelTexSize = 256;
+    config.kernel_half_tex_size = 32;
 
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
     // due to use of FFT procedure (512 is a good value to use)
-    config.kernelResolutionSize = 4096;
+    config.kernel_half_res_size = 64;
     
+    // Specifies the MINIMUM oversampling achieved during kernel creation
+    // Note: Actual oversampling in shader will be variable depending on w support, but
+    // will still achieve a minimum of what is specified here
+    config.kernel_oversampling = 4;
+
     // Single dimension of the grid
-    config.gridDimension = 2458; //2048;
-    config.renderDimension = 16;
-    config.imageSize = 2458;
-    
+    config.grid_size_padding_scalar = 1.2; // used to pad grid for potential artefacts on image edges
+    config.grid_size = 2048;
+    config.grid_size_padded = (int) ceil((double) config.grid_size * config.grid_size_padding_scalar);
+    config.renderDimension = config.grid_size_padded;
     
     // Full support of min/max kernel supported per observation
     // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
-    config.kernelMinFullSupport = (4.0 * 2.0) + 1.0;
-    config.kernelMaxFullSupport = (4.0 * 2.0) + 1.0;
+    config.min_half_support = 4;
+    config.max_half_support = 4;
     
     // Number of visibilities to process (is set when reading visibilities from file)
     // Note: if not reading from file, then must be manually changed.
@@ -150,18 +154,7 @@ void initConfig(char** argv)
     // (same as oxford gridder), false: indicates grid points should fall in between pixels (other implementations))
     config.offsetVisibilities = false;
     
-    // Uses heavy interpolation for convolving visibilities to grid (on GPU)
-    // Note: slows down gridding a batch of visibilities, but improves precision
-    config.useHeavyInterpolation = true; // DO NOT SET TO FALSE!!! (Doesnt work)
-    
-    config.accumulateMode = false;
-    
     config.numVectorElements = 2;
-    
-    // Flag to specify which fragment shader technique
-    // to use when rendering frags
-    // Options: FullCube, Reflect, Radial
-    config.fragShaderType = Reflect;
     
     config.interpolateTextures = 0; // 0 = nearest, 1 = interpolate
     
@@ -177,7 +170,7 @@ void initConfig(char** argv)
     teminationDumpCount = 1;
     
     //flag to save resulting grid to file (does this at dump time)
-    config.saveGridToFile = true;
+    config.saveGridToFile = false;
     
     //Name output grids, ignored if above variable false;
     config.outputGridReal = "../data/hec_grid_real.csv";
@@ -195,7 +188,7 @@ void initConfig(char** argv)
     memcpy(guiRenderBounds, renderTemp, sizeof (guiRenderBounds));
     
     // MaximuFm W term to support
-    config.wProjectionMaxW = 1895.410847844;
+    config.max_w = 1895.410847844;
     
     // Cell size radians for observation
     config.cellSizeRad =  8.52211548825356E-06;
@@ -204,16 +197,16 @@ void initConfig(char** argv)
     config.wProjectNumPlanes = 17;
     
     // Scales W terms (used on GPU to determine w plane index)
-    config.wScale = pow((double) config.wProjectNumPlanes-1, 2.0) / config.wProjectionMaxW;
+    config.wScale = pow((double) config.wProjectNumPlanes-1, 2.0) / config.max_w;
     
     // Field of view for observation (relies on original grid dimension)
-    config.fieldOfView =  config.cellSizeRad * (double)  config.imageSize;
+    config.fieldOfView =  config.cellSizeRad * (double) config.grid_size;
     
     // Scales visibility UV coordinates to grid coordinates
-    config.uvScale = (double) config.gridDimension * config.cellSizeRad; 
+    config.uvScale = (double) config.grid_size_padded * config.cellSizeRad; 
     
     // Used to calculate required W full support per w term
-    config.wToMaxSupportRatio = ((config.kernelMaxFullSupport - config.kernelMinFullSupport) / config.wProjectionMaxW);
+    config.wToMaxSupportRatio = ((config.max_half_support - config.min_half_support) / config.max_w);
     
     timer.accumulatedTimeMS     = 0.0;
     timer.currentAvgTimeMS      = 0.0;
@@ -257,11 +250,12 @@ int main(int argc, char** argv)
  */
 void initGridder(void) 
 {    
+    // Disable colour clamping (so we can accumulate greater than 1.0 on pixels)
     glClampColorARB(GL_CLAMP_VERTEX_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_READ_COLOR_ARB, GL_FALSE);
     glClampColorARB(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
 
-    int size = config.numVectorElements * config.renderDimension*config.renderDimension;
+    int size = config.numVectorElements * config.renderDimension * config.renderDimension;
     gridBuffer = (GLfloat*) malloc(sizeof (GLfloat) * size);
     memset(gridBuffer, 0, size);
 
@@ -282,18 +276,6 @@ void initGridder(void)
             
             for(int i = 0; i < config.visibilityCount * config.numVisibilityParams; i+=config.numVisibilityParams)
             {
-                if(COMPARE_TO_ANTHONY)
-                {
-                    fscanf(file, "%f,%f,%f,%f\n", &temp_uu, &temp_vv,&temp_real, &temp_imag);
-                    visibilities[i] = (-temp_uu * scale); // right ascension
-                    visibilities[i + 1] = (temp_vv * scale);
-                    visibilities[i + 2] = temp_ww;
-                    visibilities[i + 3] = temp_real;
-                    visibilities[i + 4] = temp_imag;
-                    visibilities[i + 5] = 1.0f;
-                }
-                else
-                {
                     fscanf(file, "%f %f %f %f %f %f\n", &temp_uu, &temp_vv, &temp_ww, &temp_real, &temp_imag, &temp_weight);
                     visibilities[i] = (-temp_uu * scale); // right ascension
                     visibilities[i + 1] = (temp_vv * scale);
@@ -301,7 +283,6 @@ void initGridder(void)
                     visibilities[i + 3] = temp_real;
                     visibilities[i + 4] = temp_imag;
                     visibilities[i + 5] = temp_weight;
-                }
             }
             
             fclose(file);
@@ -312,24 +293,11 @@ void initGridder(void)
     else
         visibilities = malloc(sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount);
     
-    GLuint vertexShader;
-    
-    if(config.useHeavyInterpolation)
-        vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER);
-    else
-        vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER_SNAP);
+    GLuint vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER);
     
     GLuint fragmentShader;
-    if(config.fragShaderType == Radial)
-        fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_RADIAL);
-    else if(config.fragShaderType == Reflect)
-    {
-        char *fragmentReflectVec = (config.numVectorElements == 2)
-            ? FRAGMENT_SHADER_REFLECT_VEC2 : FRAGMENT_SHADER_REFLECT_VEC4; 
-        fragmentShader = createShader(GL_FRAGMENT_SHADER, fragmentReflectVec);
-    }
-    else
-        fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+    char *fragmentReflectVec = (config.numVectorElements == 2) ? FRAGMENT_SHADER_REFLECT_VEC2 : FRAGMENT_SHADER_REFLECT_VEC4; 
+    fragmentShader = createShader(GL_FRAGMENT_SHADER, fragmentReflectVec);
     
     sProgram = createProgram(vertexShader, fragmentShader);
     sLocPosition = glGetAttribLocation(sProgram, "position");
@@ -371,7 +339,7 @@ void initGridder(void)
     GLenum gridVectorElements = (config.numVectorElements == 2) ? GL_RG : GL_RGBA;
     
     glTexImage2D(GL_TEXTURE_2D, 0, gridInternalFormat, config.renderDimension, config.renderDimension,
-            0, gridVectorElements, GL_FLOAT, gridBuffer);
+        0, gridVectorElements, GL_FLOAT, gridBuffer);
 
     glGenFramebuffers(1, idArray);
     fboID = idArray[0];
@@ -382,24 +350,12 @@ void initGridder(void)
     
     KERNEL_DIM = GL_TEXTURE_3D;
     
-    if(config.fragShaderType == Radial)
-    {
-        printf(">>> Using RADIAL based Fragment Shader...\n");
-        kernelBuffer = calloc((config.kernelTexSize/2) * config.wProjectNumPlanes, sizeof(FloatComplex));
-        KERNEL_DIM = GL_TEXTURE_2D;
-    }
-    else if(config.fragShaderType == Reflect)
-    {
-        printf(">>> Using REFLECT based Fragment Shader...\n");
-        kernelBuffer = calloc((config.kernelTexSize/2) * (config.kernelTexSize/2) * config.wProjectNumPlanes, sizeof(FloatComplex));
-    }
-    else
-    {
-        printf(">>> Using FULL CUBE based Fragment Shader...\n");
-        kernelBuffer = calloc(config.kernelTexSize * config.kernelTexSize * config.wProjectNumPlanes, sizeof(FloatComplex));
-    }
+    printf(">>> Using REFLECT based Fragment Shader...\n");
+    kernelBuffer = calloc((config.kernel_half_tex_size) * (config.kernel_half_tex_size) * config.wProjectNumPlanes, sizeof(FloatComplex));
     
     create_w_projection_kernels(kernelBuffer);
+
+    print(">>> EXITING THIS BULLSIT!!!...\n");
 
     //kernel TEXTURE
     kernelTextureID = idArray[1];
@@ -416,21 +372,14 @@ void initGridder(void)
     glTexParameterf(KERNEL_DIM, GL_TEXTURE_MAG_FILTER, samplingMethod); // linear = better precision
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  
-    if(config.fragShaderType != Radial)
-        glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glTexParameteri(KERNEL_DIM, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     
   //  float borderColours[] = {0.0f,0.0f,0.0f,1.0f};
   //  glTexParameterfv(KERNEL_DIM,GL_TEXTURE_BORDER_COLOR, borderColours);
     
     glEnable(KERNEL_DIM);
     
-    if(config.fragShaderType == Radial)
-        glTexImage2D(GL_TEXTURE_2D, 0,  GL_RG32F, config.kernelTexSize/2, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
-    else if(config.fragShaderType == Reflect)
-        glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize/2, config.kernelTexSize/2, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
-    else
-        glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernelTexSize, config.kernelTexSize, (int) config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
+    glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernel_half_tex_size, config.kernel_half_tex_size, config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
 
     glBindTexture(KERNEL_DIM, 0);    
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
@@ -455,8 +404,8 @@ void setShaderUniforms(void)
 {
     printf("SETTING THE SHADER UNIFORMS\n");
     glUseProgram(sProgram);
-    glUniform1f(uMinSupportOffset, config.kernelMinFullSupport);
-    glUniform1f(uWToMaxSupportRatio, (config.kernelMaxFullSupport-config.kernelMinFullSupport)/config.wProjectionMaxW); //(maxSuppor-minSupport) / maxW
+    glUniform1f(uMinSupportOffset, config.min_half_support);
+    glUniform1f(uWToMaxSupportRatio, config.wToMaxSupportRatio); //(maxSuppor-minSupport) / maxW
     glUniform1f(uGridCenter, ((float) config.renderDimension) / 2.0);
     float centerOffset =  (1.0f / (float) config.renderDimension);
     printf("Center Offset: %f\n", centerOffset);
@@ -499,14 +448,11 @@ void runGridder(void) {
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, fboID);
-    if(!config.accumulateMode)
-    {   glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    } 
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
     glEnable(GL_BLEND);
     glViewport(0, 0, config.renderDimension, config.renderDimension);
-    
 
     // start vis bind timing here
     glUseProgram(sProgram);
@@ -822,107 +768,24 @@ int calcWFullSupport(double w, double wToMaxSupportRatio, double minSupport)
     return (wSupport % 2 == 0) ? wSupport+1 : wSupport;
 }
 
-void normalize_kernel(DoubleComplex *kernel, const int texture_size, const double support)
-{    
-    double sum_of_reals = 0.0;
-    int index = 0;
-
-    for(int r = 0; r < texture_size; r++)
-    {
-        for(int c = 0; c < texture_size; c++)
-        {
-            index = r * texture_size + c;
-            sum_of_reals += kernel[index].real;
-        }
-    }
-    
-    const double scaleFactor = pow((double) texture_size / support, 2.0) / sum_of_reals;
-
-    for(int r = 0; r < texture_size; r++)
-    {
-        for(int c = 0; c < texture_size; c++)
-        {
-            index = r * texture_size + c;
-            kernel[index].real = kernel[index].real * scaleFactor;
-            kernel[index].imaginary = kernel[index].imaginary * scaleFactor;
-        }
-    }
-}
-
-//void normalizeKernel(DoubleComplex *kernel, int textureSupport, int wFullSupport)
-//{    
-//    double realSum = 0.0;
-//    int index = 0;
-//
-//    for(int r = 0; r < textureSupport; r++)
-//    {
-//        for(int c = 0; c < textureSupport; c++)
-//        {
-//            index = r * textureSupport + c;
-//            realSum += kernel[index].real;
-//        }
-//    }
-//    
-//    double scaleFactor = pow((double) textureSupport / (double) wFullSupport, 2.0) / realSum;
-//
-//    for(int r = 0; r < textureSupport; r++)
-//    {
-//        for(int c = 0; c < textureSupport; c++)
-//        {
-//            index = r * textureSupport + c;
-//            kernel[index].real = kernel[index].real * scaleFactor;
-//            kernel[index].imaginary = kernel[index].imaginary * scaleFactor;
-//        }
-//    }
-//}
-
-void normalizeKernelRadial(DoubleComplex *kernel, int resolution, int support)
-{
-    int halfResolution = resolution/2;
-    int start = (resolution * halfResolution) + halfResolution;
-    int end = start + halfResolution;
-    int r = 0;
-    double realSum = 0.0;
-    
-//    for(int i = start; i < end; i++)
-//    {
-//        realSum += kernel[i].real * (2.0*M_PI*(r+0.5));
-//        r++;
-//    }
-    
-    for(int i = start; i < end; ++i)
-        realSum += kernel[i].real * 2.0 * M_PI * ((i - start));      
-        
-    
-    double scaleFactor = pow((double)resolution/(double)support, 2.0) / realSum;
-
-    // Normalize weights
-    for(int i = start; i < end; i++)
-    {
-        kernel[i].real *= scaleFactor;
-        kernel[i].imaginary *= scaleFactor;
-    }
-}
-
 void create_w_projection_kernels(FloatComplex *w_textures)
 {
-    const int oversample = 4;
-    const int conv_size = config.kernelResolutionSize;
+    const int oversample = config.kernel_oversampling;
+    const int conv_size = config.kernel_half_res_size * 2;
     const int inner = conv_size / oversample;
-    const int grid_size = config.gridDimension;
-    const int image_size = config.imageSize;
-    const int texture_size = config.kernelTexSize;
+    const int grid_size = config.grid_size;
+    const int tex_half_size = config.kernel_half_tex_size;
     const int number_w_planes = config.wProjectNumPlanes;
+    const int min_support = config.min_half_support;
+    const int max_support = config.max_half_support;
     
     const double fov = config.fieldOfView;
     const double max_l = sin(0.5 * fov);
-    const double sampling = ((2.0 * max_l * oversample) / image_size) * ((double) grid_size / (double) conv_size);
+    const double sampling = ((2.0 * max_l * oversample) / grid_size) * ((double) grid_size / (double) conv_size);
     const double w_scale = config.wScale;
-    const double min_support = config.kernelMinFullSupport;
-    const double max_support = config.kernelMaxFullSupport;
     const double w_to_max_support_ratio = config.wToMaxSupportRatio;
     
-    if((int) max_support * oversample > conv_size) // cannot fit within chosen resolution
+    if(max_support * oversample > conv_size) // cannot fit within chosen resolution
     {
         printf("conv size: %d\n", conv_size);
         printf("oversample: %d\n", oversample);
@@ -935,7 +798,7 @@ void create_w_projection_kernels(FloatComplex *w_textures)
     }
     
     DoubleComplex *screen = calloc(conv_size * conv_size, sizeof(DoubleComplex));
-    DoubleComplex *texture = calloc(texture_size * texture_size, sizeof(DoubleComplex));
+    DoubleComplex *texture = calloc(tex_half_size * tex_half_size, sizeof(DoubleComplex));
     double *taper = calloc(inner, sizeof(double)); // 1D Prolate Spheroidal
     
     // Populate 1D Prolate Spheroidal
@@ -950,61 +813,71 @@ void create_w_projection_kernels(FloatComplex *w_textures)
     printf("FOV: %f\n", fov);
 
     const int plane = 0;
+    double max_peak = 0.0;
+    double sum_of_plane_0 = 0.0; // ignoring oversample, just sum of one curve
     
     printf(">>> UPDATE: Creating w projection kernels...\n");
-    for(int iw = 0; iw < 1; iw++)
+    for(int iw = 0; iw < number_w_planes; iw++)
     {
         const double w = iw * iw / w_scale;
-        const double support = calculate_support(w, min_support, w_to_max_support_ratio);
+        const double support = round(calculate_support(w, min_support, w_to_max_support_ratio));
         
         printf("\n>>> UPDATE: Creating kernel number %d (w = %f, support = %f)...\n", 
                 iw, w, support);
         
         // Zero out placeholder planes
         memset(screen, 0, conv_size * conv_size * sizeof(DoubleComplex));
-        memset(texture, 0, texture_size * texture_size * sizeof(DoubleComplex));
+        memset(texture, 0, tex_half_size * tex_half_size * sizeof(DoubleComplex));
         
         // Generate screen
         printf(">>> UPDATE: Generating phase screen...\n");
         generate_phase_screen(iw, conv_size, inner, sampling, w_scale, taper, screen);
         
         if(iw == plane)
-            saveKernelToFile("../data/wproj_%f_phase_screen_%d.csv", w, conv_size, screen);
+            saveKernelToFile("../data/1_wproj_%f_phase_screen_%d.csv", w, conv_size, screen);
         
         printf(">>> UPDATE: Executing Fourier Transform...\n");
-        fft_shift_in_place(screen, conv_size);
         fft_2d(screen, conv_size);
-        fft_shift_in_place(screen, conv_size);
         
         if(iw == plane)
-            saveKernelToFile("../data/wproj_%f_after_fft_%d.csv", w, conv_size, screen);
+            saveKernelToFile("../data/2_wproj_%f_after_fft_%d.csv", w, conv_size, screen);
         
-        printf(">>> UPDATE: Performing bicubic interpolation...\n");
-        // interpolate_kernel(screen, texture, conv_size, texture_size, support, oversample);
-        interpolate_kernel_tiny(screen, texture, conv_size, texture_size, 
-            (int) support * oversample);
-        
-        if(iw == plane)
-            saveKernelToFile("../data/wproj_%f_after_interpolated_%d.csv", w, texture_size, texture);
+        // Storing max peak as needed for normalizing all planes (hopefully should be plane 0)
+        double peak = sqrt(screen[0].real * screen[0].real + screen[0].imaginary * screen[0].imaginary);
+        if(peak > max_peak)
+        {
+            max_peak = peak;
+            printf(">>> UPDATE: Found new max peak %.6f at plane %d\n...", max_peak, iw);
+        }
 
-        // Normalize the kernel
-        printf(">>> UPDATE: Performing kernel normalization...\n");
-        normalize_kernel(texture, texture_size, support);
-        
+        normalize_screen_by_max_peak(max_peak, screen, conv_size);
+
+        if(iw == 0) // assumes plane for w term = 0 (no w-projection)
+        {
+            for (int iy = -min_support; iy <= min_support; ++iy)
+                for (int ix = -min_support; ix <= min_support; ++ix)
+                    sum_of_plane_0 += screen[(abs(ix) * oversample + conv_size * (abs(iy) * oversample))].real;
+        }
+
+        normalize_screen_sum_of_one(sum_of_plane_0, screen, conv_size);
+
         if(iw == plane)
-            saveKernelToFile("../data/wproj_%f_normalized_%d_from_%d.csv", w, texture_size, texture); 
-        
+             saveKernelToFile("../data/3_wproj_%f_after_normalization_%d.csv", w, conv_size, screen);
+
+        // Clip first quadrant of screen and bicubic into tex buffer
+        interpolate_kernel_to_texture(screen, texture, conv_size, tex_half_size, support, oversample);
+
+        if(iw == plane)
+            saveKernelToFile("../data/4_wproj_%f_after_interp_%d_from_%d.csv", w, tex_half_size, texture); 
+
         // Bind scaled and normalized texture to 3D texture block
         printf(">>> UPDATE: Clipping produced kernel, storing into 3D texture block...\n");
-        const int texture_size_half = texture_size / 2;
-        for(int y = texture_size_half; y < texture_size; y++)
+        for(int y = 0; y < tex_half_size; y++)
         {
-            for(int x = texture_size_half; x < texture_size; x++)
+            for(int x = 0; x < tex_half_size; x++)
             {
-                DoubleComplex sample = texture[y * texture_size + x];
-                int index = (iw * texture_size_half * texture_size_half)
-                    + ((y - texture_size_half) * texture_size_half)
-                    + (x - texture_size_half);
+                DoubleComplex sample = texture[y * tex_half_size + x];
+                int index = (iw * tex_half_size * tex_half_size) + (y * tex_half_size) + x;
                 
                 w_textures[index] = (FloatComplex) {
                     .real      = (float) sample.real, 
@@ -1019,28 +892,107 @@ void create_w_projection_kernels(FloatComplex *w_textures)
     free(screen);
 }
 
+// screen, texture, conv_size, tex_half_size, support, oversample
+void interpolate_kernel_to_texture(DoubleComplex *screen, DoubleComplex* texture, int conv_size, 
+    int tex_half_size, double support, int oversample)
+{
+    // Mapping cells to [0, 1] coordinates (like OpenGL coords)
+    double sample_dist = 1.0 / ((support + 1.0) * oversample);
+    
+    // Storage for neighbours, synthesized points
+    DoubleComplex *n = calloc(16, sizeof(DoubleComplex));
+    DoubleComplex *p = calloc(4, sizeof(DoubleComplex));
+    
+    // Neighbours shift values (rs = row shift, cs = col shift)
+    double *rs = calloc(16, sizeof(double));
+    double *cs = calloc(16, sizeof(double));
+    double row_shift, col_shift = 0.0;
+    
+    for(int r = 0; r < tex_half_size; r++)
+    {
+        // Determine relative shift for interpolation row [0.0, 1.0]
+        row_shift = (1.0 / tex_half_size) * r; // TODO: Should it have minus 1 here? 
+        
+        for(int c = 0; c < tex_half_size; c++)
+        {
+            memset(rs, 0, 16 * sizeof(double));
+            memset(cs, 0, 16 * sizeof(double));
+            memset(n, 0, 16 * sizeof(DoubleComplex));
+            memset(p, 0, 4 * sizeof(DoubleComplex));
+
+            // Determine relative shift for interpolation col [0.0, 1.0]
+            col_shift = (1.0 / tex_half_size) * c; // TODO: Should it have minus 1 here? 
+            
+            // gather 16 neighbours
+            get_bicubic_neighbours(row_shift, col_shift, n, rs, cs, conv_size, screen, support, oversample);
+            // interpolate intermediate samples
+            p[0] = interpolateSample(n[0], n[1], n[2], n[3],
+                cs[0], cs[1], cs[2], cs[3], sample_dist, col_shift);
+            p[1] = interpolateSample(n[4], n[5], n[6], n[7],
+                cs[4], cs[5], cs[6], cs[7], sample_dist, col_shift);
+            p[2] = interpolateSample(n[8], n[9], n[10], n[11],
+                cs[8], cs[9], cs[10], cs[11], sample_dist, col_shift);
+            p[3] = interpolateSample(n[12], n[13], n[14], n[15],
+                cs[12], cs[13], cs[14], cs[15], sample_dist, col_shift);
+            
+            // interpolate final sample
+            texture[r * tex_half_size + c] = interpolateSample(p[0], p[1], p[2], p[3],
+               rs[1], rs[5], rs[9], rs[13], sample_dist, row_shift);
+        }
+    }
+
+    free(n);
+    free(p);
+    free(rs);
+    free(cs);
+}
+
+
+void normalize_screen_by_max_peak(double max_peak, DoubleComplex* screen, int conv_size)
+{
+    int conv_half = conv_size / 2;
+
+    for(int r = 0; r < conv_half; r++)
+        for(int c = 0; c < conv_half; c++)
+        {
+            int i = r * conv_size + c;
+            screen[i] = complex_scale(screen[i], 1.0 / max_peak);
+        }
+}
+
+void normalize_screen_sum_of_one(double sum_of_plane_0, DoubleComplex* screen, int conv_size)
+{
+    int conv_half = conv_size / 2;
+
+    for(int r = 0; r < conv_half; r++)
+        for(int c = 0; c < conv_half; c++)
+        {
+            int i = r * conv_size + c;
+            screen[i] = complex_scale(screen[i], 1.0 / sum_of_plane_0);
+        }
+}
+
 void generate_phase_screen(const int iw, const int conv_size, const int inner,
     const double sampling, const double w_scale, double *taper, DoubleComplex *screen)
 {
     double f = (2.0 * M_PI * iw * iw) / w_scale;
-    int conv_size_half = conv_size / 2;
     int inner_half = inner / 2;
     
-    for(int iy = 0 ; iy < inner; ++iy)
+    for(int iy = -inner_half; iy < inner_half; ++iy)
     {
-        double taper_y = taper[iy];
+        double taper_y = taper[iy + inner_half];
         double m = sampling * (double) iy;
         double msq = m*m;
-        // int offset = (iy > -1 ? iy : (iy + conv_size)) * conv_size;
+        int offset = (iy > -1 ? iy : (iy + conv_size)) * conv_size;
         
-        for(int ix = 0; ix < inner; ++ix)
+        for(int ix = -inner_half; ix < inner_half; ++ix)
         {
             double l = sampling * (double) ix;
             double rsq = l * l + msq;
             if (rsq < 1.0) {
-                double taper_x = taper[ix];
+                double taper_x = taper[ix + inner_half];
                 double taper = taper_x * taper_y;
-                int index = (conv_size_half - inner_half + iy) * conv_size + (conv_size_half - inner_half + ix);
+                int index = (offset + (ix > -1 ? ix : (ix + conv_size)));
                 double phase = f * (sqrt(1.0 - rsq) - 1.0);
                 screen[index] = (DoubleComplex) {
                     .real      = taper * cos(phase),
@@ -1149,176 +1101,6 @@ void calc_bit_reverse_indices(int n, int* indices)
         indices[i] = r;
     }
 }
-
-/*
- * Function: createWProjectionPlanes 
- * --------------------
- * Creates all w projection planes between 0 and maximum W term provided in
- * the gridder config struct.
- * 
- * wTextures : the block of memory for storing N number of w projection kernels
- * 
- * returns: nothing
- */
-//void createWProjectionPlanes(FloatComplex *wTextures)
-//{                
-//    int convolutionSize = config.kernelResolutionSize;
-//    int textureSupport = config.kernelTexSize;
-//    int numWPlanes = config.wProjectNumPlanes;
-//    double wScale = config.wScale;
-//    double fov = config.fieldOfView;
-//    
-//    // Flat two dimension array
-//    DoubleComplex *screen = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
-//    // Create w screen 
-//    DoubleComplex *shift = calloc(convolutionSize * convolutionSize, sizeof(DoubleComplex));
-//    
-//     // Test variable to output W plane creation steps
-//    // (phase screen, after fft, interpolated, normalized)
-//    int plane = 0;
-//    printf("Num W Planes: %d and wScale %lf\n", numWPlanes, wScale);
-//    for(int iw = 0; iw < numWPlanes; iw++)
-//    {        
-//        // Calculate w term and w specific support size
-//        double w = iw * iw / wScale;
-//        double fresnel = w * ((0.5 * fov)*(0.5 * fov));
-//        int wFullSupport = calcWFullSupport(w, config.wToMaxSupportRatio, config.kernelMinFullSupport);
-//        printf("Creating W Plane: (%d) For w = %f, field of view = %f, " \
-//                "fresnel number = %f, full w support: %d texSupport : %d\n", iw, w, fov, fresnel, wFullSupport, textureSupport);
-//        
-//        // Create Phase Screen
-//        createPhaseScreen(convolutionSize, screen, w, fov, wFullSupport);
-//        
-//        if(iw == plane)
-//            saveKernelToFile("data/wproj_%f_phase_screen_%d.csv", w, convolutionSize, screen);
-//        
-//        // Perform shift and inverse FFT of Phase Screen
-//        fft2dShift(convolutionSize, screen, shift);
-//        inverseFFT2dVectorRadixTransform(convolutionSize, shift, screen);
-//        fft2dShift(convolutionSize, screen, shift);
-//        
-//        
-//        if(iw == plane)
-//            saveKernelToFile("data/wproj_%f_after_fft_%d.csv", w, convolutionSize, shift);
-//            
-//        // Interpolate w projection kernel down to texture support dimensions
-//         DoubleComplex *interpolated = calloc(textureSupport * textureSupport, sizeof(DoubleComplex));
-//         interpolateKernel(shift, interpolated, convolutionSize, textureSupport);
-//         
-//         if(iw == plane)
-//             saveKernelToFile("data/wproj_%f_after_interpolated_%d.csv", w, textureSupport, interpolated);
-//
-//        // Normalize the kernel
-//        normalizeKernel(interpolated, textureSupport, wFullSupport);
-//        
-//        if(iw == plane)
-//            saveKernelToFile("data/wproj_%f_normalized_%d_from_%d.csv", w, textureSupport, interpolated); 
-//        
-//        
-//        // Bind interpolated kernel to texture matrix
-//        int startIndex = (config.fragShaderType == Reflect) ? textureSupport/2 : 0;
-//        int kernelWidth = (config.fragShaderType == Reflect) ? textureSupport/2 : textureSupport;
-//            
-//        for(int y = startIndex; y < textureSupport; y++)
-//        {
-//            for(int x = startIndex; x < textureSupport; x++)
-//            {
-//                DoubleComplex interpWeight = interpolated[y * textureSupport + x];
-//                FloatComplex weight = (FloatComplex) {.real = (float) interpWeight.real, .imaginary = (float) interpWeight.imaginary};
-//                int index = (iw * kernelWidth * kernelWidth) + ((y-startIndex) * kernelWidth) + (x-startIndex);
-//                wTextures[index] = weight;
-//            }
-//
-//        }  
-//         
-//        free(interpolated);
-//        memset(screen, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
-//        memset(shift, 0, convolutionSize * convolutionSize * sizeof(DoubleComplex));
-//    }
-//    
-//    free(screen);
-//    free(shift);
-//}
-
-//void createPhaseScreenNew(int iw, int full_support, int conv_size, 
-//    double sampling, double w_scale, DoubleComplex *screen)
-//{        
-//    double f = (2.0 * M_PI * iw * iw) / w_scale;
-//    int conv_size_half = conv_size / 2;
-//    int half_support = (full_support - 1) / 2;
-//    
-//    for(int iy = 0; iy < full_support; ++iy)
-//    {
-//        double stride_y = fabs((iy - full_support / 2) / ((double) full_support / 2.0));
-//        double taper_y = calcSpheroidalWeight(stride_y);
-//        printf(">>> %f\n", stride_y);
-//        double m = sampling * (double) (iy - half_support);
-//        double msq = m*m;
-//        for(int ix = 0; ix < full_support; ++ix)
-//        {
-//            double l = sampling * (double) (ix - half_support);
-//            double rsq = l * l + msq;
-//            if (rsq < 1.0) {
-//                double stride_x = fabs((ix - full_support / 2) / ((double) full_support / 2.0));
-//                double taper_x = calcSpheroidalWeight(stride_x);
-//                double taper = taper_x * taper_y;               
-//                int row_index = conv_size_half + iy - half_support;
-//                int col_index = conv_size_half + ix - half_support;
-//                int index = row_index * conv_size + col_index;
-//                double phase = f * (sqrt(1.0 - rsq) - 1.0);
-//                screen[index] = (DoubleComplex) {
-//                    .real      = taper * cos(phase),
-//                    .imaginary = taper * sin(phase)
-//                };
-//            }
-//        }
-//    }
-//}
-
-//void createPhaseScreen(int resolutionFullSupport, DoubleComplex *screen, double w, double fieldOfView, int wFullSupport)
-//{        
-//    int resolutionHalfSupport = resolutionFullSupport/2;
-//    int paddedWFullSupport = wFullSupport;
-//    int paddedWHalfSupport = paddedWFullSupport/2;
-//    int index = 0;
-//    double taper, taperY, nuX, nuY, radius;
-//    double l, m, lsq, rsq, phase;
-//    
-//    for(int iy = 0; iy < paddedWFullSupport; iy++)
-//    {
-//        l = (((double) iy-(paddedWHalfSupport)) / (double) wFullSupport) * fieldOfView;
-//        lsq = l*l;
-//        phase = 0.0;
-//        
-//        nuY = fabs(calcAndrewShift(iy, paddedWFullSupport)); 
-//        if(config.fragShaderType != Radial)
-//            taperY = calcSpheroidalWeight(nuY);
-//        
-//        for(int ix = 0; ix < paddedWFullSupport; ix++)
-//        {
-//            m = (((double) ix-(paddedWHalfSupport)) / (double) wFullSupport) * fieldOfView;
-//            rsq = lsq+(m*m);
-//            index = (iy+(resolutionHalfSupport-paddedWHalfSupport)) * resolutionFullSupport
-//                    + (ix+(resolutionHalfSupport-paddedWHalfSupport));
-//
-//            nuX = fabs(calcAndrewShift(ix, paddedWFullSupport));
-//            taper = taperY * calcSpheroidalWeight(nuX);
-//            
-//            if(rsq < 1.0)
-//            {
-//                phase = w * (1.0 - sqrt(1.0 - rsq));
-//                screen[index] = complexConjugateExp(phase);
-//
-//            }
-//            
-//            if(rsq == 0.0)
-//                screen[index] = (DoubleComplex) {.real = 1.0, .imaginary = 0.0};
-//                
-//            screen[index].real *= taper;
-//            screen[index].imaginary *= taper;
-//        }
-//    }
-//}
 
 /*
  * Function: inverseFFT2dVectorRadixTransform 
@@ -1441,13 +1223,18 @@ double prolate_spheroidal(double nu)
         0.004028559, -0.03697768, 0.1021332, -0.1201436, 0.06412774};
     static double q[] = {1.0, 0.8212018, 0.2078043,
         1.0, 0.9599102, 0.2918724};
-    
-    int part, sp, sq;
-    double nuend, delta, top, bottom;
-    
+
+    int part = 0;
+    int sp = 0;
+    int sq = 0;
+    double nuend = 0.0;
+    double delta = 0.0;
+    double top = 0.0;
+    double bottom = 0.0;
+
     if(nu >= 0.0 && nu < 0.75)
     {
-        part = 0;   
+        part = 0;
         nuend = 0.75;
     }
     else if(nu >= 0.75 && nu <= 1.0)
@@ -1463,7 +1250,7 @@ double prolate_spheroidal(double nu)
     sq = part * 3;
     top = p[sp];
     bottom = q[sq];
-    
+
     for(int i = 1; i < 5; i++)
         top += p[sp+i] * pow(delta, i);
     for(int i = 1; i < 3; i++)
@@ -1540,15 +1327,10 @@ int calcRelativeIndex(double x, double width)
     return ((int) floor(((x+1.0f)/2.0f) * (width-offset)))+1;
 }
 
-double calcSphrShift(double index, double width)
-{   
-    return -1.0 + index * (2.0/width);
-}
-
 void saveKernelToFile(char* filename, double w, int support, DoubleComplex* data)
 {
     char *buffer[100];
-    sprintf(buffer, filename, w, support, config.kernelResolutionSize);
+    sprintf(buffer, filename, w, support, config.kernel_half_res_size * 2);
     FILE *file = fopen(buffer, "w");
     for(int r = 0; r < support; r++)
     {
@@ -1556,24 +1338,6 @@ void saveKernelToFile(char* filename, double w, int support, DoubleComplex* data
         {
             //if(r == support/2)
                 fprintf(file, "%.15f ", data[r * support + c].real);
-        }
-        fprintf(file, "\n");
-    }
-    fclose(file);
-    printf("FILE SAVED\n");
-}
-
-void saveRadialKernelsToFile(char* filename, int support, int wPlanes, FloatComplex* data)
-{
-    char *buffer[100];
-    sprintf(buffer, filename, wPlanes, support);
-    FILE *file = fopen(buffer, "w");
-    for(int r = 0; r < wPlanes; r++)
-    {   
-        int index = r * support; 
-        for(int c = 0; c < support; c++)
-        {
-                fprintf(file, "%f, ", data[index+c].real);
         }
         fprintf(file, "\n");
     }
@@ -1623,98 +1387,33 @@ void saveGridToFile(int support)
     printf("Grid has been output to file\n");
 }
 
-void interpolate_kernel_tiny(DoubleComplex *screen, DoubleComplex *texture, 
-    int screen_size, int texture_size, int oversampled_support)
-{
-    double oversampled_support_shift = 2.0 / (oversampled_support - 1.0);
-    // Storage for neighbours, synthesized points
-    DoubleComplex *n = calloc(16, sizeof(DoubleComplex));
-    DoubleComplex *p = calloc(4, sizeof(DoubleComplex));
-    
-    // Neighbours shift values (rs = row shift, cs = col shift)
-    double *rs = calloc(16, sizeof(double));
-    double *cs = calloc(16, sizeof(double));
-    double rowShift, colShift = 0.0;
-    
-    for(int r = 0; r < texture_size; r++)
-    {
-        // Determine relative shift for interpolation row [-1.0, 1.0]
-        rowShift = calcInterpolateShift(r, texture_size);
-        
-        for(int c = 0; c < texture_size; c++)
-        {
-            memset(rs, 0, 16 * sizeof(double));
-            memset(cs, 0, 16 * sizeof(double));
-            memset(n, 0, 16 * sizeof(DoubleComplex));
-            memset(p, 0, 4 * sizeof(DoubleComplex));
-
-            // Determine relative shift for interpolation col [-1.0, 1.0]
-            colShift = calcInterpolateShift(c, texture_size);
-            
-            // gather 16 neighbours
-            getBicubicNeighboursTiny(rowShift, colShift, n, rs, cs, screen_size, screen, oversampled_support);
-            // interpolate intermediate samples
-            p[0] = interpolateSample(n[0], n[1], n[2], n[3],
-                cs[0], cs[1], cs[2], cs[3], oversampled_support_shift, colShift);
-            p[1] = interpolateSample(n[4], n[5], n[6], n[7],
-                cs[4], cs[5], cs[6], cs[7], oversampled_support_shift, colShift);
-            p[2] = interpolateSample(n[8], n[9], n[10], n[11],
-                cs[8], cs[9], cs[10], cs[11], oversampled_support_shift, colShift);
-            p[3] = interpolateSample(n[12], n[13], n[14], n[15],
-                cs[12], cs[13], cs[14], cs[15], oversampled_support_shift, colShift);
-            
-            // interpolate final sample
-            texture[r * texture_size + c] = interpolateSample(p[0], p[1], p[2], p[3],
-               rs[1], rs[5], rs[9], rs[13], oversampled_support_shift, rowShift);
-        }
-    }
-
-    free(n);
-    free(p);
-    free(rs);
-    free(cs);
-}
-
-void getBicubicNeighboursTiny(double rowShift, double colShift, DoubleComplex *n, double *rs, double *cs,
-        int screen_size, DoubleComplex *screen, int oversampled_support)
+void get_bicubic_neighbours(double row_shift, double col_shift, DoubleComplex *n, double *rs, double *cs,
+        int screen_size, DoubleComplex *screen, double support, int oversample)
 {   
-    // support = 9, os = 4
-    int half_support = (9-1) / 2;
-    int oversampled_half_support = half_support * 4; // 16
-    int offset = (screen_size / 2 - oversampled_half_support);
+    double oversampled_half_support = (support + 1.0) * oversample; 
 
-
-   // int offset = (screen_size / 2 - oversampled_support / 2);
-
-    // int x = ((int) floor(((colShift + 1.0f) / 2.0f) * (oversampled_support-1)))+1;
-    // int y = ((int) floor(((rowShift + 1.0f) / 2.0f) * (oversampled_support-1)))+1;
-
-    int x = (int) floor(((colShift + 1.0) / 2.0) * (double)oversampled_support);
-    int y = (int) floor(((rowShift + 1.0) / 2.0) * (double)oversampled_support);
+    int screen_x = (int) floor(col_shift * oversampled_half_support);
+    int screen_y = (int) floor(row_shift * oversampled_half_support);
 
     // counter for active neighbour
     int nIndex = 0;
 
     // gather 16 neighbours
-    for(int r = y - 1; r < y + 3; r++)
+    for(int r = screen_y - 1; r < screen_y + 3; r++)
     {   
-        for(int c = x - 1; c < x + 3; c++)
+        for(int c = screen_x - 1; c < screen_x + 3; c++)
         {
-            rs[nIndex] = calcSphrShift(r, oversampled_support);
+            rs[nIndex] = (double) r / oversampled_half_support;
 
             // set row and col shifts for neighbour
-            cs[nIndex] = calcSphrShift(c, oversampled_support);  
+            cs[nIndex] = (double) c / oversampled_half_support;
 
             // neighbour falls out of bounds
-            if(r < 0 || c < 0 || r > oversampled_support || c > oversampled_support)
+            if(r > oversampled_half_support || c > oversampled_half_support)
                 n[nIndex] = (DoubleComplex) {.real = 0.0, .imaginary = 0.0};
             // neighbour exists
             else
-            {    
-                int row = (r >= oversampled_support/2) ? r : oversampled_support/2 -r;
-                int col = (c >= oversampled_support/2) ? c : oversampled_support/2 -c;
-                n[nIndex] = screen[(row + offset) * screen_size + col + offset];
-            }
+                n[nIndex] = screen[abs(r) * screen_size + abs(c)];
             nIndex++;
         }
     }   
@@ -1828,15 +1527,16 @@ void saveGriddingStats(char *filename)
     if(f != NULL)
     {
         fprintf(f, ">>> Gridding Statistics <<<\n");
-        fprintf(f, "Grid Dimension: %d\n", config.gridDimension);
+        fprintf(f, "Grid Dimension: %d\n", config.grid_size);
+        fprintf(f, "Grid Dimension Padded: %d\n", config.grid_size_padded);
         fprintf(f, "Render Dimension: %d\n", config.renderDimension);
-        fprintf(f, "Texture Dimension: %d\n", config.kernelTexSize);
-        fprintf(f, "Resolution Dimension: %d\n", config.kernelResolutionSize);
+        fprintf(f, "Texture Dimension: %d\n", config.kernel_half_tex_size);
+        fprintf(f, "Resolution Dimension: %d\n", config.kernel_half_res_size);
         fprintf(f, "Cell Size Rads: %.15f\n", config.cellSizeRad);
-        fprintf(f, "Max W: %.15f\n", config.wProjectionMaxW);
+        fprintf(f, "Max W: %.15f\n", config.max_w);
         fprintf(f, "W Scale: %.15f\n", config.wScale);
-        fprintf(f, "Kernel Min Support: %f\n", config.kernelMinFullSupport);
-        fprintf(f, "Kernel Max Support: %f\n", config.kernelMaxFullSupport);
+        fprintf(f, "Kernel Min Support: %f\n", config.min_half_support);
+        fprintf(f, "Kernel Max Support: %f\n", config.max_half_support);
         fprintf(f, "Texture interpolation: %d\n", config.interpolateTextures);
         fprintf(f, "Average Gridding Time: %f\n", ((double)timer.accumulatedTimeMS/timer.iterations));
         fprintf(f, "STDev Gridding Time: %f\n", sqrt(timer.sumOfSquareDiffTimeMS/(timer.iterations-1)));
