@@ -114,23 +114,23 @@ void initConfig(char** argv)
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernel_half_tex_size = 32;
+    config.kernel_half_tex_size = 64;
 
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
     // due to use of FFT procedure (512 is a good value to use)
-    config.kernel_half_res_size = 64;
+    config.kernel_half_res_size = 512;
     
     // Specifies the MINIMUM oversampling achieved during kernel creation
     // Note: Actual oversampling in shader will be variable depending on w support, but
     // will still achieve a minimum of what is specified here
-    config.kernel_oversampling = 4;
+    config.kernel_oversampling = 16;
 
     // Single dimension of the grid
     config.grid_size_padding_scalar = 1.2; // used to pad grid for potential artefacts on image edges
     config.grid_size = 2048;
     config.grid_size_padded = (int) ceil((double) config.grid_size * config.grid_size_padding_scalar);
-    config.renderDimension = config.grid_size_padded;
+    config.renderDimension = 32; // config.grid_size_padded;
     
     // Full support of min/max kernel supported per observation
     // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
@@ -156,7 +156,7 @@ void initConfig(char** argv)
     
     config.numVectorElements = 2;
     
-    config.interpolateTextures = 0; // 0 = nearest, 1 = interpolate
+    config.interpolateTextures = 1; // 0 = nearest, 1 = interpolate
     
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
     config.numVisibilityParams = 6;
@@ -170,7 +170,7 @@ void initConfig(char** argv)
     teminationDumpCount = 1;
     
     //flag to save resulting grid to file (does this at dump time)
-    config.saveGridToFile = false;
+    config.saveGridToFile = true;
     
     //Name output grids, ignored if above variable false;
     config.outputGridReal = "../data/hec_grid_real.csv";
@@ -354,8 +354,6 @@ void initGridder(void)
     kernelBuffer = calloc((config.kernel_half_tex_size) * (config.kernel_half_tex_size) * config.wProjectNumPlanes, sizeof(FloatComplex));
     
     create_w_projection_kernels(kernelBuffer);
-
-    print(">>> EXITING THIS BULLSIT!!!...\n");
 
     //kernel TEXTURE
     kernelTextureID = idArray[1];
@@ -789,7 +787,7 @@ void create_w_projection_kernels(FloatComplex *w_textures)
     {
         printf("conv size: %d\n", conv_size);
         printf("oversample: %d\n", oversample);
-        printf("max_support: %f\n", max_support);
+        printf("max_support: %d\n", max_support);
         printf("max_support * os: %d\n", (int) max_support * oversample);
         
         printf(">>> ERROR: Resolution too small to contain product of max support"
@@ -806,7 +804,7 @@ void create_w_projection_kernels(FloatComplex *w_textures)
     {
         double taper_nu = fabs(calculate_window_stride(taper_i, inner));
         taper[taper_i] = prolate_spheroidal(taper_nu);
-        printf("Sphr: %f => %f\n", taper_nu, taper[taper_i]);
+        // printf("Sphr: %f => %f\n", taper_nu, taper[taper_i]);
     }
     
     printf("Sampling: %f\n", sampling);
@@ -893,6 +891,7 @@ void create_w_projection_kernels(FloatComplex *w_textures)
 }
 
 // screen, texture, conv_size, tex_half_size, support, oversample
+// interpolate_kernel_to_texture(screen, texture, conv_size, tex_half_size, support, oversample);
 void interpolate_kernel_to_texture(DoubleComplex *screen, DoubleComplex* texture, int conv_size, 
     int tex_half_size, double support, int oversample)
 {
@@ -911,8 +910,8 @@ void interpolate_kernel_to_texture(DoubleComplex *screen, DoubleComplex* texture
     for(int r = 0; r < tex_half_size; r++)
     {
         // Determine relative shift for interpolation row [0.0, 1.0]
-        row_shift = (1.0 / tex_half_size) * r; // TODO: Should it have minus 1 here? 
-        
+        //row_shift = (2.0 * tex_half_size - 1.0) /(2*tex_half_size*(tex_half_size-1.0)) * r; // TODO: Should it have minus 1 here? 
+        row_shift = 1.0/(tex_half_size)*r;
         for(int c = 0; c < tex_half_size; c++)
         {
             memset(rs, 0, 16 * sizeof(double));
@@ -921,8 +920,10 @@ void interpolate_kernel_to_texture(DoubleComplex *screen, DoubleComplex* texture
             memset(p, 0, 4 * sizeof(DoubleComplex));
 
             // Determine relative shift for interpolation col [0.0, 1.0]
-            col_shift = (1.0 / tex_half_size) * c; // TODO: Should it have minus 1 here? 
-            
+            //col_shift = (2.0 * tex_half_size - 1.0) /(2*tex_half_size*(tex_half_size-1.0)) *  c; // TODO: Should it have minus 1 here? 
+            col_shift = 1.0/(tex_half_size)*c;
+
+
             // gather 16 neighbours
             get_bicubic_neighbours(row_shift, col_shift, n, rs, cs, conv_size, screen, support, oversample);
             // interpolate intermediate samples
@@ -1390,6 +1391,8 @@ void saveGridToFile(int support)
 void get_bicubic_neighbours(double row_shift, double col_shift, DoubleComplex *n, double *rs, double *cs,
         int screen_size, DoubleComplex *screen, double support, int oversample)
 {   
+
+    //input of interest from the big convolution
     double oversampled_half_support = (support + 1.0) * oversample; 
 
     int screen_x = (int) floor(col_shift * oversampled_half_support);
@@ -1502,6 +1505,9 @@ void get_bicubic_neighbours(double row_shift, double col_shift, DoubleComplex *n
 //     }   
 // }
 
+//p[0] = interpolateSample(n[0], n[1], n[2], n[3],
+//                cs[0], cs[1], cs[2], cs[3], sample_dist, col_shift);
+
 DoubleComplex interpolateSample(DoubleComplex z0, DoubleComplex z1, 
     DoubleComplex z2, DoubleComplex z3, double x0, double x1, double x2,
     double x3, double h, double x)
@@ -1535,8 +1541,8 @@ void saveGriddingStats(char *filename)
         fprintf(f, "Cell Size Rads: %.15f\n", config.cellSizeRad);
         fprintf(f, "Max W: %.15f\n", config.max_w);
         fprintf(f, "W Scale: %.15f\n", config.wScale);
-        fprintf(f, "Kernel Min Support: %f\n", config.min_half_support);
-        fprintf(f, "Kernel Max Support: %f\n", config.max_half_support);
+        fprintf(f, "Kernel Min Support: %d\n", config.min_half_support);
+        fprintf(f, "Kernel Max Support: %d\n", config.max_half_support);
         fprintf(f, "Texture interpolation: %d\n", config.interpolateTextures);
         fprintf(f, "Average Gridding Time: %f\n", ((double)timer.accumulatedTimeMS/timer.iterations));
         fprintf(f, "STDev Gridding Time: %f\n", sqrt(timer.sumOfSquareDiffTimeMS/(timer.iterations-1)));

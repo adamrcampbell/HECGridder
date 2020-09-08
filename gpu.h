@@ -40,6 +40,7 @@
   out vec2 fComplex; \
   out float wPlane;\
   out float conjugate;\
+  out float pointsize;\
   void main() { \
      gl_Position.rg = ((position.rg*uvScale) / gridCenter) + vec2(gridCenterOffset,gridCenterOffset); \
      wPlane = sqrt(abs(position.b*wScale)) * wStep + (0.5 * wStep);\
@@ -47,8 +48,11 @@
      conjugate = -sign(position.b);\
      gl_PointSize = (w_half_support * 2.0) + 1.0;\
      fComplex = complex.rg * complex.b; \
+     pointsize = gl_PointSize;\
   }"
 
+//NEED TO MAKE UNIFORM VALUE TO PASS IN HALF TEX SIZE TO CHANGE 30
+//vec2 coord = (1.0 + 2.0*(2.0 * half_tex_size - 1.0)*abs(gl_PointCoord.xy-0.5))/(2.0*half_tex_size); 
 #define FRAGMENT_SHADER_REFLECT_VEC2 " \
   #version 430\n \
   precision highp float; \
@@ -56,12 +60,15 @@
   in vec2 fComplex; \
   in float wPlane; \
   in float conjugate; \
+  in float pointsize;\
   void main() { \
-    vec2 coord = abs(2.0*gl_PointCoord.xy - 1.0);\
+    float half_tex_size = 64.0; \
+    vec2 coord = 1.0/(2.0*half_tex_size) + 2.0*pointsize*abs(gl_PointCoord.xy-0.5)/(pointsize+1.0);\
     vec2 kernelLookup = texture(kernelTex,vec3(coord.xy,wPlane)).rg; \
     kernelLookup.g = kernelLookup.g * conjugate;\
     gl_FragColor.rg = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
                                 kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
+    gl_FragColor.g = coord.x; \
   }"
 
 #define FRAGMENT_SHADER_REFLECT_VEC4 " \
