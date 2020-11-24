@@ -63,7 +63,7 @@
   in float pointsize;\
   void main() { \
     float half_tex_size = 64.0; \
-    vec2 coord = 1.0/(2.0*half_tex_size) + 2.0*pointsize*abs(gl_PointCoord.xy-0.5)/(pointsize+1.0);\
+    vec2 coord = 1.0 / (2.0 * half_tex_size) + 2.0 * pointsize * abs(gl_PointCoord.xy - 0.5) / (pointsize + 1.0);\
     vec2 kernelLookup = texture(kernelTex,vec3(coord.xy,wPlane)).rg; \
     kernelLookup.g = kernelLookup.g * conjugate;\
     gl_FragColor.rg = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
