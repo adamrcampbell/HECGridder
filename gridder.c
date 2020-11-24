@@ -91,6 +91,7 @@ static GLuint fboID;
 static GLuint textureID;
 static GLuint kernelTextureID;
 static GLuint textureID;
+static GLfloat uHalfTextureSize;
 static GLfloat* gridBuffer;
 static GLenum KERNEL_DIM;
 static FloatComplex* kernelBuffer;
@@ -311,6 +312,7 @@ void initGridder(void)
     uWStep = glGetUniformLocation(sProgram, "wStep");
     uUVScale = glGetUniformLocation(sProgram, "uvScale");
     uNumPlanes = glGetUniformLocation(sProgram, "numPlanes");
+    uHalfTextureSize = glGetUniformLocation(sProgram, "half_tex_size");
 
     vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER_RENDER);
     fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_RENDER);
@@ -412,6 +414,7 @@ void setShaderUniforms(void)
     glUniform1f(uWStep, 1.0 / (float) config.wProjectNumPlanes);
     glUniform1f(uUVScale, config.uvScale);
     glUniform1f(uNumPlanes, config.wProjectNumPlanes);
+    glUniform1f(uHalfTextureSize, config.kernel_half_tex_size);
     glUseProgram(0);
     
     glUseProgram(sProgramRender);

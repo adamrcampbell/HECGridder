@@ -57,12 +57,12 @@
   #version 430\n \
   precision highp float; \
   uniform sampler3D kernelTex;\
+  uniform float half_tex_size;\
   in vec2 fComplex; \
   in float wPlane; \
   in float conjugate; \
   in float pointsize;\
   void main() { \
-    float half_tex_size = 64.0; \
     vec2 coord = 1.0 / (2.0 * half_tex_size) + 2.0 * pointsize * abs(gl_PointCoord.xy - 0.5) / (pointsize + 1.0);\
     vec2 kernelLookup = texture(kernelTex,vec3(coord.xy,wPlane)).rg; \
     kernelLookup.g = kernelLookup.g * conjugate;\
