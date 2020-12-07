@@ -115,12 +115,12 @@ void initConfig(char** argv)
     // Full support texture dimension (must be power of 2 greater or equal to kernelMaxFullSupport)
     // Tradeoff note: higher values result in better precision, but result in more memory used and 
     // slower rendering to the grid in GPU.. NOTE RADIAL MODE USES ONLY HALF THIS VALUE
-    config.kernel_half_tex_size = 64;
-
+    config.kernel_half_tex_size = 512;
+    printf("PERFORMING HALF TEXTURE OVERSAMPLING OF %d ",config.kernel_half_tex_size);
     // Full support kernel resolution used for creating w projection kernels (always power of 2 greater than kernelTexSize)
     // Tradeoff note: higher values result in better precision, but result in a slower kernel creation for each plane
     // due to use of FFT procedure (512 is a good value to use)
-    config.kernel_half_res_size = 512;
+    config.kernel_half_res_size = 2048;
     
     // Specifies the MINIMUM oversampling achieved during kernel creation
     // Note: Actual oversampling in shader will be variable depending on w support, but
@@ -131,7 +131,7 @@ void initConfig(char** argv)
     config.grid_size_padding_scalar = 1.2; // used to pad grid for potential artefacts on image edges
     config.grid_size = 2048;
     config.grid_size_padded = (int) ceil((double) config.grid_size * config.grid_size_padding_scalar);
-    config.renderDimension = 32; // config.grid_size_padded;
+    config.renderDimension = config.grid_size_padded;
     
     // Full support of min/max kernel supported per observation
     // Note: kernelMaxFullSupport must be less than or equal to kernelResolutionSize
@@ -143,7 +143,7 @@ void initConfig(char** argv)
     config.visibilityCount = 1;
     
     // Flag to determine if reading visibilities from a source file
-    config.visibilitiesFromFile = false;
+    config.visibilitiesFromFile = true;
     
     // Source of visibility data
     config.visibilitySourceFile = "../data/GLEAM_small_visibilities.csv"; //"datasets/el82-70.txt";
@@ -157,10 +157,10 @@ void initConfig(char** argv)
     
     config.numVectorElements = 2;
     
-    config.interpolateTextures = 1; // 0 = nearest, 1 = interpolate
+    config.interpolateTextures = 0; // 0 = nearest, 1 = interpolate
     
     // Number of visibility attributes (U, V, W, Real, Imaginary, Weight) - does not change
-    config.numVisibilityParams = 6;
+    config.numVisibilityParams = 5;
     
     // Number of gridding iterations to perform before terminating (all visibilities convolved each iteration)
     config.displayDumpTime = 1;
@@ -283,7 +283,7 @@ void initGridder(void)
                     visibilities[i + 2] = temp_ww * scale;
                     visibilities[i + 3] = temp_real;
                     visibilities[i + 4] = temp_imag;
-                    visibilities[i + 5] = temp_weight;
+                    //visibilities[i + 5] = temp_weight;
             }
             
             fclose(file);
@@ -378,10 +378,9 @@ void initGridder(void)
   //  glTexParameterfv(KERNEL_DIM,GL_TEXTURE_BORDER_COLOR, borderColours);
     
     glEnable(KERNEL_DIM);
-    
     glTexImage3D(GL_TEXTURE_3D, 0,  GL_RG32F, config.kernel_half_tex_size, config.kernel_half_tex_size, config.wProjectNumPlanes, 0, GL_RG, GL_FLOAT, kernelBuffer);
-
     glBindTexture(KERNEL_DIM, 0);    
+
     glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
     glPointParameteri(GL_POINT_SPRITE_COORD_ORIGIN,GL_LOWER_LEFT);
     glEnable(GL_POINT_SPRITE);
@@ -390,6 +389,13 @@ void initGridder(void)
     setShaderUniforms();
     glFinish();
     
+    GLuint textureNames[1];
+    GLclampf priorities[1];
+    textureNames[0] = kernelTextureID;
+    priorities[0] = 1.0f;
+
+    glPrioritizeTextures(1,textureNames,priorities);
+
     printf("SEEMS LIKE ITS ALL SET UP FINE??? \n");
 }
 
@@ -421,6 +427,9 @@ void setShaderUniforms(void)
     glUniform1f(uGridSizeRender, config.renderDimension);
     glUseProgram(0);  
     printf("DONE WITH SETTING THE SHADER UNIFORMS\n");
+
+    
+
 }
 
 /*
@@ -465,40 +474,52 @@ void runGridder(void) {
     glBufferData(GL_ARRAY_BUFFER, sizeof (GLfloat) * config.numVisibilityParams * config.visibilityCount, visibilities, GL_STATIC_DRAW);
     glEnableVertexAttribArray(sLocPosition);
     glVertexAttribPointer(sLocPosition, 3, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), 0);
-    glEnableVertexAttribArray(sComplex);
-    glVertexAttribPointer(sComplex, 3, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), (void*) (3*sizeof(GLfloat)));
-    
-    // Begin OpenGL Timing
-    int done = 0;
-    GLuint64 timerStart, timerEnd;
-    GLuint query[2];
-    glGenQueries(2, query);
-    glQueryCounter(query[0], GL_TIMESTAMP);
-    
-    // Execute gridding
-    glDrawArrays(GL_POINTS, 0, config.visibilityCount);
-    glFinish();
-    
-    // Finish OpenGL Timing
-    glQueryCounter(query[1], GL_TIMESTAMP);
    
-    // wait until the query results are available
-    while (!done) {
-        glGetQueryObjectiv(query[1], 
-                           GL_QUERY_RESULT_AVAILABLE, 
-                           &done);
+    glEnableVertexAttribArray(sComplex);
+    glVertexAttribPointer(sComplex, 2, GL_FLOAT, GL_FALSE, config.numVisibilityParams*sizeof(GLfloat), (void*) (3*sizeof(GLfloat)));
+    
+    glEnable(GL_CULL_FACE);  
+    glCullFace(GL_BACK);  
+
+
+    //int loops = 1;
+
+     int loops = 50;
+
+    for(int i = 0; i < loops; i++)
+    {
+        // Begin OpenGL Timing
+        int done = 0;
+        GLuint64 timerStart, timerEnd;
+        GLuint query[2];
+        glGenQueries(2, query);
+        glQueryCounter(query[0], GL_TIMESTAMP);
+        
+        // Execute gridding
+        glDrawArrays(GL_POINTS, 0, config.visibilityCount);
+        glFinish();
+        
+        // Finish OpenGL Timing
+        glQueryCounter(query[1], GL_TIMESTAMP);
+    
+        // wait until the query results are available
+        while (!done) {
+            glGetQueryObjectiv(query[1], 
+                            GL_QUERY_RESULT_AVAILABLE, 
+                            &done);
+        }
+        // get the query results
+        glGetQueryObjectui64v(query[0], GL_QUERY_RESULT, &timerStart);
+        glGetQueryObjectui64v(query[1], GL_QUERY_RESULT, &timerEnd);
+        
+        
+        double msTime = (timerEnd - timerStart) / 1000000.0;
+        //timer.accumulatedTimeMS += msTime;
+        timer.iterations++;
+        //timer.currentAvgTimeMS = timer.accumulatedTimeMS / timer.iterations;
+        //timer.sumOfSquareDiffTimeMS += pow(msTime - timer.currentAvgTimeMS, 2.0);
+        printf("%d) Time Elapsed: %f ms\n", timer.iterations, msTime);
     }
-    // get the query results
-    glGetQueryObjectui64v(query[0], GL_QUERY_RESULT, &timerStart);
-    glGetQueryObjectui64v(query[1], GL_QUERY_RESULT, &timerEnd);
-    
-    
-    double msTime = (timerEnd - timerStart) / 1000000.0;
-    timer.accumulatedTimeMS += msTime;
-    timer.iterations++;
-    timer.currentAvgTimeMS = timer.accumulatedTimeMS / timer.iterations;
-    timer.sumOfSquareDiffTimeMS += pow(msTime - timer.currentAvgTimeMS, 2.0);
-    printf("%d) Time Elapsed: %f ms\n", timer.iterations, msTime);
     
     
     
@@ -786,7 +807,7 @@ void create_w_projection_kernels(FloatComplex *w_textures)
     const double w_scale = config.wScale;
     const double w_to_max_support_ratio = config.wToMaxSupportRatio;
     
-    if(max_support * oversample > conv_size) // cannot fit within chosen resolution
+    if(((max_support * 2) + 1) * oversample > conv_size) // cannot fit within chosen resolution
     {
         printf("conv size: %d\n", conv_size);
         printf("oversample: %d\n", oversample);

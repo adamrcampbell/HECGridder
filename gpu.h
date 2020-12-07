@@ -36,7 +36,7 @@
   uniform float uvScale;\
   uniform float numPlanes;\
   in vec3 position; \
-  in vec3 complex; \
+  in vec2 complex; \
   out vec2 fComplex; \
   out float wPlane;\
   out float conjugate;\
@@ -47,11 +47,10 @@
      float w_half_support = abs(wToMaxSupportRatio * position.b) + minSupportOffset; \
      conjugate = -sign(position.b);\
      gl_PointSize = (w_half_support * 2.0) + 1.0;\
-     fComplex = complex.rg * complex.b; \
+     fComplex = complex.rg \
      pointsize = gl_PointSize;\
   }"
 
-//NEED TO MAKE UNIFORM VALUE TO PASS IN HALF TEX SIZE TO CHANGE 30
 //vec2 coord = (1.0 + 2.0*(2.0 * half_tex_size - 1.0)*abs(gl_PointCoord.xy-0.5))/(2.0*half_tex_size); 
 #define FRAGMENT_SHADER_REFLECT_VEC2 " \
   #version 430\n \
@@ -68,7 +67,6 @@
     kernelLookup.g = kernelLookup.g * conjugate;\
     gl_FragColor.rg = vec2(kernelLookup.r * fComplex.r - kernelLookup.g * fComplex.g, \
                                 kernelLookup.g * fComplex.r + kernelLookup.r * fComplex.g); \
-    gl_FragColor.g = coord.x; \
   }"
 
 #define FRAGMENT_SHADER_REFLECT_VEC4 " \
